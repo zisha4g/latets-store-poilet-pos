@@ -6,3 +6,4 @@ dist/
 .env.*
 backup/
 .supabase_schema.sql
+supabase/.temp/
