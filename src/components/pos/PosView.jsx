@@ -807,6 +807,7 @@ const PosView = ({ products, handlers, settings, savedCarts = [] }) => {
             cart={saleState.cart}
             taxes={appliedTaxes}
             serviceCharges={appliedServiceCharges}
+          customer={saleState.customer}
         />
       </motion.div>
 

@@ -3,11 +3,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
 import { DollarSign } from 'lucide-react';
+import SolaCardForm from './SolaCardForm';
 
 
-const CheckoutModal = ({ isOpen, onOpenChange, cart, total = 0, subtotal = 0, onSave, taxes = [], serviceCharges = [] }) => {
+const CheckoutModal = ({ isOpen, onOpenChange, cart, total = 0, subtotal = 0, onSave, taxes = [], serviceCharges = [], customer }) => {
   const [amountTendered, setAmountTendered] = useState('');
   const [change, setChange] = useState(0);
   const { toast } = useToast();
@@ -88,42 +90,54 @@ const CheckoutModal = ({ isOpen, onOpenChange, cart, total = 0, subtotal = 0, on
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 py-4">
           <div className="space-y-6 rounded-2xl border border-border bg-background p-6 shadow-sm">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                <span>Payment Method</span>
-                <span className="text-emerald-600">Cash only</span>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="amount-tendered" className="text-xl">Amount Tendered</Label>
-                <Input
-                  id="amount-tendered"
-                  type="number"
-                  value={amountTendered}
-                  onChange={(e) => calculateChange(e.target.value)}
-                  className="text-2xl h-14"
-                  placeholder="0.00"
-                />
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                {quickCashValues.map(value => (
-                  <Button size="sm" variant="outline" key={value} onClick={() => handleQuickCash(value)}>
-                    <DollarSign className="mr-1 h-3 w-3" /> ${value.toFixed(2)}
+            <Tabs defaultValue="cash" className="space-y-4">
+              <TabsList>
+                <TabsTrigger value="cash">Cash</TabsTrigger>
+                <TabsTrigger value="card">Card</TabsTrigger>
+              </TabsList>
+              <TabsContent value="cash" className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="amount-tendered" className="text-xl">Amount Tendered</Label>
+                  <Input
+                    id="amount-tendered"
+                    type="number"
+                    value={amountTendered}
+                    onChange={(e) => calculateChange(e.target.value)}
+                    className="text-2xl h-14"
+                    placeholder="0.00"
+                  />
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {quickCashValues.map(value => (
+                    <Button size="sm" variant="outline" key={value} onClick={() => handleQuickCash(value)}>
+                      <DollarSign className="mr-1 h-3 w-3" /> ${value.toFixed(2)}
+                    </Button>
+                  ))}
+                  <Button size="sm" variant="outline" onClick={() => handleQuickCash(total)}>
+                    Exact
                   </Button>
-                ))}
-                <Button size="sm" variant="outline" onClick={() => handleQuickCash(total)}>
-                  Exact
+                </div>
+                <div className="text-2xl font-semibold">
+                  Change: <span className="text-green-600">${change.toFixed(2)}</span>
+                </div>
+                <Button onClick={handleCashPayment} className="w-full text-lg py-5" size="lg">
+                  Finalize Cash Payment
                 </Button>
-              </div>
-              <div className="text-2xl font-semibold">
-                Change: <span className="text-green-600">${change.toFixed(2)}</span>
-              </div>
-            </div>
-            <Button onClick={handleCashPayment} className="w-full text-lg py-5" size="lg">
-              Finalize Cash Payment
-            </Button>
-            <div className="text-xs text-muted-foreground">
-              Credit card, terminal, and gift card tabs are temporarily disabled while we simplify the checkout.
-            </div>
+              </TabsContent>
+              <TabsContent value="card">
+                <SolaCardForm
+                  amount={total}
+                  customer={customer}
+                  onPaymentSuccess={(details) => {
+                    onSave({
+                      paymentMethod: 'card',
+                      refNum: details?.refNum,
+                      token: details?.token,
+                    });
+                  }}
+                />
+              </TabsContent>
+            </Tabs>
           </div>
           <div className="bg-secondary p-6 rounded-lg space-y-2">
             <h3 className="font-bold text-lg mb-4">Order Summary</h3>
