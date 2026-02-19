@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
+import { Outlet, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/SupabaseAuthContext.jsx';
 import { Helmet } from 'react-helmet-async';
 import { Toaster } from '@/components/ui/toaster';
@@ -7,13 +7,16 @@ import Sidebar from '@/components/pos/Sidebar';
 import CallModal from '@/components/pos/pbx/CallModal';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { useDataManagement } from '@/hooks/useDataManagement';
+import { useCart } from '@/hooks/useCart.jsx';
 import { toast } from '@/components/ui/use-toast';
 import { applyTheme } from '@/lib/themes';
 
 const AppLayout = ({ isDemo = false }) => {
   const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const isOnline = useOnlineStatus();
+  const { clearCart } = useCart();
   
   // Initialize data management with safe fallback for user
   const { data, handlers, loading: dataLoading, error: dataError, customersWithStats, refreshData } = useDataManagement(
@@ -26,12 +29,11 @@ const AppLayout = ({ isDemo = false }) => {
   const [activeCall, setActiveCall] = useState(null);
   const [storeName, setStoreName] = useState('StorePilot');
 
-  // Authentication check
   useEffect(() => {
     if (!authLoading && !user && !isDemo) {
-      navigate('/login');
+      clearCart();
     }
-  }, [user, authLoading, navigate, isDemo]);
+  }, [authLoading, clearCart, isDemo, user]);
 
   // Theme application
   useEffect(() => {
@@ -129,8 +131,8 @@ const AppLayout = ({ isDemo = false }) => {
     );
   }
 
-  if (!user && !isDemo) {
-    return null; 
+  if (!authLoading && !user && !isDemo) {
+    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }
 
   // Construct context with safety checks

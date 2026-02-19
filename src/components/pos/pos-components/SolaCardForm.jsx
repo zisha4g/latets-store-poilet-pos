@@ -24,6 +24,12 @@ const loadScript = (src) => {
   });
 };
 
+const formatExp = (digits) => {
+  if (!digits) return '';
+  if (digits.length <= 2) return digits;
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}`;
+};
+
 const SolaCardForm = ({ amount, customer, onPaymentSuccess }) => {
   const { toast } = useToast();
   const [config, setConfig] = useState(null);
@@ -32,6 +38,8 @@ const SolaCardForm = ({ amount, customer, onPaymentSuccess }) => {
   const [processing, setProcessing] = useState(false);
   const [loadingConfig, setLoadingConfig] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [cardNumberError, setCardNumberError] = useState('');
+  const [focusedField, setFocusedField] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -64,7 +72,44 @@ const SolaCardForm = ({ amount, customer, onPaymentSuccess }) => {
       if (window.setAccount) {
         window.setAccount(config.ifieldsKey, SOFTWARE_NAME, SOFTWARE_VERSION);
       }
+      const baseStyle = {
+        border: '0px solid transparent',
+        'border-radius': '0px',
+        'font-size': '14px',
+        padding: '8px 12px',
+        width: '100%',
+        height: '100%',
+        'line-height': '20px',
+        'box-sizing': 'border-box',
+        color: '#111827',
+        'background-color': 'transparent',
+        'font-family': 'Inter, sans-serif',
+      };
+
+      if (window.setIfieldStyle) {
+        window.setIfieldStyle('card-number', baseStyle);
+        window.setIfieldStyle('cvv', baseStyle);
+      }
+
+      if (window.addiFieldKeyPressCallback) {
+        window.addiFieldKeyPressCallback((data) => {
+          const formattedLength = data?.cardNumberFormattedLength || 0;
+          const maxLength = data?.issuer === 'amex' ? 17 : 19;
+          if (formattedLength > maxLength) {
+            setCardNumberError('Card number is too long.');
+          } else {
+            setCardNumberError('');
+          }
+        });
+      }
+
+      if (window.enableAutoFormatting) {
+        window.enableAutoFormatting(' ');
+      } else if (window.enableAutoFormat) {
+        window.enableAutoFormat(' ');
+      }
     };
+
     setupIfields().catch(() => {
       setLoadError('Unable to load iFields. Check SOLA_IFIELDS_VERSION in Supabase secrets.');
       toast({
@@ -175,28 +220,46 @@ const SolaCardForm = ({ amount, customer, onPaymentSuccess }) => {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-5">
+      <div className="space-y-1">
+        <h4 className="text-sm font-semibold text-muted-foreground">Card Details</h4>
+        <p className="text-xs text-muted-foreground">Secure fields powered by Cardknox</p>
+      </div>
+
       <div className="space-y-2">
         <Label>Card Number</Label>
-        <iframe
-          title="Card Number"
-          data-ifields-id="card-number"
-          data-ifields-placeholder="Card Number"
-          src={`https://cdn.cardknox.com/ifields/${config.ifieldsVersion}/ifield.htm`}
-          className="w-full h-12 rounded-md border border-input bg-background"
-        />
+        <div
+          className={`ifields-field ${focusedField === 'card-number' ? 'ifields-field--focused' : ''} ${cardNumberError ? 'ifields-field--error' : ''}`}
+        >
+          <iframe
+            title="Card Number"
+            data-ifields-id="card-number"
+            data-ifields-placeholder="Card Number"
+            src={`https://cdn.cardknox.com/ifields/${config.ifieldsVersion}/ifield.htm`}
+            className="ifields-frame"
+            onFocus={() => setFocusedField('card-number')}
+            onBlur={() => setFocusedField(null)}
+          />
+        </div>
         <input name="xCardNum" type="hidden" data-ifields-id="card-number-token" />
+        {cardNumberError && (
+          <p className="text-xs text-destructive">{cardNumberError}</p>
+        )}
       </div>
 
       <div className="space-y-2">
         <Label>CVV</Label>
-        <iframe
-          title="CVV"
-          data-ifields-id="cvv"
-          data-ifields-placeholder="CVV"
-          src={`https://cdn.cardknox.com/ifields/${config.ifieldsVersion}/ifield.htm`}
-          className="w-full h-12 rounded-md border border-input bg-background"
-        />
+        <div className={`ifields-field ${focusedField === 'cvv' ? 'ifields-field--focused' : ''}`}>
+          <iframe
+            title="CVV"
+            data-ifields-id="cvv"
+            data-ifields-placeholder="CVV"
+            src={`https://cdn.cardknox.com/ifields/${config.ifieldsVersion}/ifield.htm`}
+            className="ifields-frame"
+            onFocus={() => setFocusedField('cvv')}
+            onBlur={() => setFocusedField(null)}
+          />
+        </div>
         <input name="xCVV" type="hidden" data-ifields-id="cvv-token" />
       </div>
 
@@ -205,9 +268,10 @@ const SolaCardForm = ({ amount, customer, onPaymentSuccess }) => {
           <Label htmlFor="exp">Exp (MMYY)</Label>
           <Input
             id="exp"
-            value={exp}
+            value={formatExp(exp)}
             onChange={(event) => setExp(event.target.value.replace(/\D/g, '').slice(0, 4))}
-            placeholder="MMYY"
+            placeholder="MM/YY"
+            className="h-11 rounded-lg"
           />
         </div>
         <div className="space-y-2">
@@ -217,12 +281,13 @@ const SolaCardForm = ({ amount, customer, onPaymentSuccess }) => {
             value={zip}
             onChange={(event) => setZip(event.target.value)}
             placeholder="Postal code"
+            className="h-11 rounded-lg"
           />
         </div>
       </div>
 
       <div className="flex justify-end">
-        <Button type="submit" disabled={!canSubmit}>
+        <Button type="submit" disabled={!canSubmit} className="rounded-lg">
           {processing ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processing...

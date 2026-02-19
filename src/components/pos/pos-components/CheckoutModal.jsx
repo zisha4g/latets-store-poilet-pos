@@ -5,7 +5,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
-import { DollarSign } from 'lucide-react';
 import SolaCardForm from './SolaCardForm';
 
 
@@ -90,37 +89,56 @@ const CheckoutModal = ({ isOpen, onOpenChange, cart, total = 0, subtotal = 0, on
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 py-4">
           <div className="space-y-6 rounded-2xl border border-border bg-background p-6 shadow-sm">
-            <Tabs defaultValue="cash" className="space-y-4">
-              <TabsList>
-                <TabsTrigger value="cash">Cash</TabsTrigger>
-                <TabsTrigger value="card">Card</TabsTrigger>
+            <Tabs defaultValue="cash" className="space-y-5">
+              <TabsList className="grid grid-cols-2 rounded-xl bg-muted/70 p-1">
+                <TabsTrigger value="cash" className="rounded-lg text-sm font-semibold data-[state=active]:bg-background data-[state=active]:shadow-sm">
+                  Cash
+                </TabsTrigger>
+                <TabsTrigger value="card" className="rounded-lg text-sm font-semibold data-[state=active]:bg-background data-[state=active]:shadow-sm">
+                  Card
+                </TabsTrigger>
               </TabsList>
               <TabsContent value="cash" className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="amount-tendered" className="text-xl">Amount Tendered</Label>
+                  <Label htmlFor="amount-tendered" className="text-base font-semibold">Amount Tendered</Label>
                   <Input
                     id="amount-tendered"
                     type="number"
                     value={amountTendered}
                     onChange={(e) => calculateChange(e.target.value)}
-                    className="text-2xl h-14"
+                    className="text-2xl h-14 rounded-xl"
                     placeholder="0.00"
                   />
                 </div>
                 <div className="grid grid-cols-3 gap-2">
                   {quickCashValues.map(value => (
-                    <Button size="sm" variant="outline" key={value} onClick={() => handleQuickCash(value)}>
-                      <DollarSign className="mr-1 h-3 w-3" /> ${value.toFixed(2)}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      key={value}
+                      onClick={() => handleQuickCash(value)}
+                      className="h-10 rounded-lg font-semibold"
+                    >
+                      ${value.toFixed(2)}
                     </Button>
                   ))}
-                  <Button size="sm" variant="outline" onClick={() => handleQuickCash(total)}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleQuickCash(total)}
+                    className="h-10 rounded-lg font-semibold"
+                  >
                     Exact
                   </Button>
                 </div>
                 <div className="text-2xl font-semibold">
                   Change: <span className="text-green-600">${change.toFixed(2)}</span>
                 </div>
-                <Button onClick={handleCashPayment} className="w-full text-lg py-5" size="lg">
+                <Button
+                  onClick={handleCashPayment}
+                  className="w-full text-lg py-6 rounded-xl shadow-sm"
+                  size="lg"
+                >
                   Finalize Cash Payment
                 </Button>
               </TabsContent>

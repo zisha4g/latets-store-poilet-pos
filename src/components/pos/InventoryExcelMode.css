@@ -1,0 +1,124 @@
+/* ── Excel Mode Styles ─────────────────────────────────────────────── */
+
+/* Hide sidebar and fixed headers when Excel Mode is active */
+body.excel-mode-active aside {
+  display: none !important;
+}
+
+body.excel-mode-active [class*="fixed top-0 left-0 right-0 z-40"] {
+  display: none !important;
+}
+
+/* Sheet table */
+.excel-sheet-table {
+  border-collapse: collapse;
+  border-spacing: 0;
+}
+
+.excel-sheet-table th,
+.excel-sheet-table td {
+  border: 1px solid hsl(var(--border));
+} 
+
+.excel-sheet-table th {
+  background-color: hsl(var(--secondary));
+}
+
+/* Borderless inputs inside cells */
+.excel-cell-input {
+  height: 2rem;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0.25rem 0.5rem !important;
+}
+
+.excel-cell-input:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* Borderless selects inside cells */
+.excel-cell-select {
+  width: 100%;
+  height: 2rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+}
+
+.excel-cell-select:focus {
+  outline: none;
+}
+
+/* Column resize handle */
+.excel-col-resizer {
+  position: absolute;
+  top: -0.5rem;
+  right: -0.5rem;
+  width: 0.75rem;
+  height: calc(100% + 1rem);
+  cursor: col-resize;
+  z-index: 20;
+}
+
+.excel-col-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0.4rem;
+  bottom: 0.4rem;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background-color: hsl(var(--border));
+}
+
+.excel-col-resizer:hover::after {
+  background-color: hsl(var(--ring));
+}
+
+/* Sticky add-product footer */
+.excel-add-row {
+  position: sticky;
+  bottom: 0;
+  z-index: 15;
+  background-color: hsl(var(--background));
+}
+
+/* Selected cell highlight */
+.excel-cell-selected {
+  position: relative;
+  box-shadow: inset 0 0 0 2px hsl(var(--ring));
+  z-index: 1;
+}
+
+/* Selected row highlight */
+.excel-row-selected td {
+  background-color: hsl(var(--accent));
+}
+
+/* Selected column highlight */
+.excel-col-selected {
+  background-color: hsl(var(--accent));
+}
+
+/* Row number handle */
+.excel-row-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  margin-right: 0.25rem;
+  font-size: 0.75rem;
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--secondary));
+  color: hsl(var(--muted-foreground));
+}
+
+.excel-row-handle:hover {
+  background-color: hsl(var(--accent));
+}
