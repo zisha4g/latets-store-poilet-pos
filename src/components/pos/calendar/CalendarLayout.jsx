@@ -2,17 +2,23 @@ import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Calendar, Plus, CheckCircle, Clock, AlertCircle, Edit } from 'lucide-react';
+import { Calendar, Plus, CheckCircle, Clock, AlertCircle, Edit, Star, Sunset, Sun } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import CalendarGrid from './CalendarGrid';
 import WeeklyView from './WeeklyView';
 import AppointmentModal from './AppointmentModal';
 import TaskModal from './TaskModal';
 import TaskList from './TaskList';
+import useHebrewCalendar, { getHolidayColor, getHolidayCategoryLabel } from '@/hooks/useHebrewCalendar';
+import { ZMANIM_LABELS } from '@/components/pos/settings/SettingsCalendar';
 
-const CalendarLayout = ({ appointments = [], tasks = [], handlers = {}, refreshData }) => {
+const HEBREW_WEEKDAYS = ['יום ראשון', 'יום שני', 'יום שלישי', 'יום רביעי', 'יום חמישי', 'יום שישי', 'שבת'];
+const HEBREW_GREG_MONTHS = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
+
+const CalendarLayout = ({ appointments = [], tasks = [], handlers = {}, refreshData, calendarSettings }) => {
   const [activeTab, setActiveTab] = useState('calendar');
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [currentMonth, setCurrentMonth] = useState(new Date()); // Lifted from CalendarGrid so hook year stays in sync
   const [isAppointmentModalOpen, setIsAppointmentModalOpen] = useState(false);
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState(null);
@@ -22,6 +28,16 @@ const CalendarLayout = ({ appointments = [], tasks = [], handlers = {}, refreshD
   // Local state for surgical updates - avoid full refreshes
   const [localAppointments, setLocalAppointments] = useState(appointments);
   const [localTasks, setLocalTasks] = useState(tasks);
+
+  // Hebrew calendar (local computation, no API) — use currentMonth's year so navigation updates events
+  const hebrewCal = useHebrewCalendar(currentMonth.getFullYear(), null, calendarSettings);
+
+  // Parse calendar settings for conditional rendering
+  const calSettings = hebrewCal.parsedSettings || {};
+  const jewishCalEnabled = calSettings.enableJewishCalendar !== false;
+  const zmanimEnabled = jewishCalEnabled && calSettings.enableZmanim !== false;
+  const candleLightingEnabled = jewishCalEnabled && calSettings.enableCandleLighting !== false;
+  const havdalahEnabled = jewishCalEnabled && calSettings.enableHavdalah !== false;
   
   // Sync with parent props when they change
   React.useEffect(() => {
@@ -250,13 +266,15 @@ const CalendarLayout = ({ appointments = [], tasks = [], handlers = {}, refreshD
         </TabsList>
 
         <TabsContent value="calendar" className="flex-1 overflow-hidden">
-          <div className="grid grid-cols-3 gap-4 h-full">
-            <div className="col-span-2 overflow-auto">
+          <div className="grid grid-cols-4 gap-4 h-full">
+            <div className="col-span-3 overflow-auto">
               <CalendarGrid 
                 appointments={localAppointments}
                 tasks={localTasks}
                 selectedDate={selectedDate}
                 onSelectDate={setSelectedDate}
+                currentMonth={currentMonth}
+                onMonthChange={setCurrentMonth}
                 onSelectAppointment={(apt) => {
                   setSelectedAppointment(apt);
                   setIsAppointmentModalOpen(true);
@@ -265,17 +283,100 @@ const CalendarLayout = ({ appointments = [], tasks = [], handlers = {}, refreshD
                   setSelectedTask(task);
                   setIsTaskModalOpen(true);
                 }}
+                hebrewCal={hebrewCal}
               />
             </div>
             <div className="overflow-auto border-l pl-4">
-              <h3 className="font-bold text-lg mb-4">
-                {selectedDate.toLocaleDateString('en-US', { 
-                  weekday: 'long', 
-                  month: 'long', 
-                  day: 'numeric' 
-                })}
+              <h3 className="font-bold text-lg mb-1">
+                {calSettings.hebrewMonthNames !== false
+                  ? `${HEBREW_WEEKDAYS[selectedDate.getDay()]}, ${selectedDate.getDate()} ${HEBREW_GREG_MONTHS[selectedDate.getMonth()]}`
+                  : selectedDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+                }
               </h3>
-              
+
+              {/* Hebrew date */}
+              {jewishCalEnabled && (
+              <p className="text-sm text-muted-foreground mb-3 font-medium" dir="rtl">
+                📅 {hebrewCal.getHebrewDate(selectedDate)}
+              </p>
+              )}
+
+              {/* Jewish holidays for selected date */}
+              {jewishCalEnabled && (() => {
+                const holidays = hebrewCal.getHolidaysForDate(selectedDate);
+                if (holidays.length === 0) return null;
+                return (
+                  <div className="mb-4">
+                    <h4 className="font-semibold text-sm text-muted-foreground mb-2">
+                      <Star className="w-3.5 h-3.5 inline mr-1" />
+                      לוח עברי
+                    </h4>
+                    <div className="space-y-2">
+                      {holidays.map((ev, i) => {
+                        const colors = getHolidayColor(ev);
+                        const hebrewName = ev.render('he') || ev.render();
+                        return (
+                          <div key={`heb-${i}`} className={`p-2 rounded border ${colors.bg} ${colors.border}`} dir="rtl">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className={`font-medium text-sm ${colors.text}`}>{hebrewName}</p>
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${colors.bg} ${colors.text} border ${colors.border} whitespace-nowrap`}>
+                                {getHolidayCategoryLabel(ev)}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Zmanim / Shabbat times */}
+              {zmanimEnabled && (() => {
+                const shabbatTimes = hebrewCal.getShabbatTimesForDate(selectedDate);
+                const zmanim = hebrewCal.getZmanim(selectedDate);
+                if (!zmanim && !shabbatTimes) return null;
+
+                const isFriday = selectedDate.getDay() === 5;
+                const isSaturday = selectedDate.getDay() === 6;
+
+                // Filter zmanim based on settings
+                const zmanimToShow = calSettings.zmanimToShow || { sunrise: true, chatzot: true, sunset: true };
+
+                return (
+                  <div className="mb-4">
+                    <h4 className="font-semibold text-sm text-muted-foreground mb-2">
+                      🕐 זמנים
+                    </h4>
+                    <div className="bg-amber-50 border border-amber-200 rounded p-2 text-xs space-y-1" dir="rtl">
+                      {zmanim && Object.entries(zmanimToShow).filter(([_, show]) => show).map(([key]) => {
+                        if (!zmanim[key]) return null;
+                        const label = ZMANIM_LABELS[key];
+                        return (
+                          <div key={key} className="flex justify-between">
+                            <span>{label?.he || key}</span>
+                            <span className="font-mono">{zmanim[key]}</span>
+                          </div>
+                        );
+                      })}
+                      {shabbatTimes && (isFriday || isSaturday) && (
+                        <>
+                          <hr className="border-amber-300 my-1" />
+                          <p className="font-semibold text-amber-800">🕯️ שבת</p>
+                          {candleLightingEnabled && (
+                            <div className="flex justify-between"><span>הדלקת נרות</span><span className="font-mono">{shabbatTimes.candleLighting}</span></div>
+                          )}
+                          <div className="flex justify-between"><span>שקיעה (ערב שבת)</span><span className="font-mono">{shabbatTimes.sunset}</span></div>
+                          {havdalahEnabled && (
+                            <div className="flex justify-between"><span>הבדלה</span><span className="font-mono">{shabbatTimes.havdalah}</span></div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
               {appointmentsForDate.length > 0 && (
                 <div className="mb-6">
                   <h4 className="font-semibold text-sm text-muted-foreground mb-2">Appointments</h4>
@@ -370,6 +471,7 @@ const CalendarLayout = ({ appointments = [], tasks = [], handlers = {}, refreshD
               setSelectedDate(day);
               setIsAppointmentModalOpen(true);
             }}
+            hebrewCal={hebrewCal}
           />
         </TabsContent>
 

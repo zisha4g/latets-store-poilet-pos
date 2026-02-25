@@ -23,7 +23,7 @@ const CalendarPage = () => {
     refreshData,
   } = context;
 
-  const { appointments = [], tasks = [] } = data || {};
+  const { appointments = [], tasks = [], settings = {} } = data || {};
 
   if (loading && (!appointments || appointments.length === 0)) {
     return (
@@ -53,6 +53,7 @@ const CalendarPage = () => {
       tasks={tasks}
       handlers={handlers}
       refreshData={refreshData}
+      calendarSettings={settings.calendarSettings}
     />
   );
 };

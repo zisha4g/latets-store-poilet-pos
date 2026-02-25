@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Palette, Building, Percent, Puzzle, Keyboard, Users, CreditCard, Menu, X } from 'lucide-react';
+import { Palette, Building, Percent, Puzzle, Keyboard, Users, CreditCard, Menu, X, Calendar } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useResponsive } from '@/lib/responsive';
@@ -17,6 +17,7 @@ const SettingsLayout = ({ children, settings }) => {
     { id: 'appearance', label: 'Appearance', icon: Palette },
     { id: 'financials', label: 'Financials', icon: Percent },
     { id: 'modules', label: 'Modules', icon: Puzzle },
+    { id: 'calendar', label: 'Calendar', icon: Calendar },
     { id: 'shortcuts', label: 'Keyboard Shortcuts', icon: Keyboard },
   ].filter(section => section.condition !== false);
 

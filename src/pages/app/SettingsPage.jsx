@@ -10,6 +10,7 @@ import SettingsModules from '@/components/pos/settings/SettingsModules';
 import SettingsShortcuts from '@/components/pos/settings/SettingsShortcuts';
 import PBXSettings from '@/components/pos/settings/PBXSettings';
 import PaymentGatewaySettings from '@/components/pos/settings/PaymentGatewaySettings';
+import SettingsCalendar from '@/components/pos/settings/SettingsCalendar';
 
 const SettingsPage = () => {
     const { data, handlers } = useOutletContext();
@@ -32,6 +33,8 @@ const SettingsPage = () => {
                 return <SettingsModules settings={settings} onUpdate={handlers.settings.update} />;
             case 'pbx':
                 return settings.enablePBX?.value ? <PBXSettings settings={settings} onUpdate={handlers.settings.update} pbxData={pbxData} /> : <p>PBX Module is disabled. Enable it in the Modules tab.</p>;
+            case 'calendar':
+                return <SettingsCalendar settings={settings} onUpdate={handlers.settings.update} />;
             case 'shortcuts':
                 return <SettingsShortcuts />;
             default:

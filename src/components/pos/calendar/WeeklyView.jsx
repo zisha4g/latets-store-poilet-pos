@@ -3,12 +3,21 @@ import { ChevronLeft, ChevronRight, Clock, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 
+// Hebrew calendar data comes via hebrewCal prop
+
+const HEBREW_WEEKDAY_SHORT = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'שבת'];
+const HEBREW_GREGORIAN_MONTHS_W = [
+  'ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני',
+  'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'
+];
+
 const WeeklyView = ({ 
   appointments = [], 
   selectedDate = new Date(), 
   onDateSelect, 
   onSelectAppointment,
-  onNewAppointment 
+  onNewAppointment,
+  hebrewCal
 }) => {
   const [weekOffset, setWeekOffset] = useState(0);
   const scrollContainerRef = useRef(null);
@@ -95,8 +104,9 @@ const WeeklyView = ({
           <div>
             <h3 className="font-bold text-lg">Week View</h3>
             <p className="text-sm text-muted-foreground">
-              {weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - {
-                new Date(weekStart.getTime() + 6 * 24 * 60 * 60 * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+              {hebrewCal?.parsedSettings?.hebrewMonthNames !== false
+                ? `${weekStart.getDate()} ${HEBREW_GREGORIAN_MONTHS_W[weekStart.getMonth()]} - ${new Date(weekStart.getTime() + 6*24*60*60*1000).getDate()} ${HEBREW_GREGORIAN_MONTHS_W[new Date(weekStart.getTime() + 6*24*60*60*1000).getMonth()]} ${new Date(weekStart.getTime() + 6*24*60*60*1000).getFullYear()}`
+                : `${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${new Date(weekStart.getTime() + 6 * 24 * 60 * 60 * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
               }
             </p>
           </div>
@@ -124,23 +134,40 @@ const WeeklyView = ({
         {/* Header aligned with time gutter + 7 day columns */}
         <div className="grid grid-cols-8 gap-0 items-end">
           <div className="text-right pr-2 text-xs text-muted-foreground select-none">Time</div>
-          {weekDays.map((day, index) => (
-            <div key={index} className="text-center">
-              <div className="text-xs font-semibold text-muted-foreground">
-                {day.toLocaleDateString('en-US', { weekday: 'short' })}
+          {weekDays.map((day, index) => {
+            const jewishCalEnabled = hebrewCal?.parsedSettings?.enableJewishCalendar !== false;
+            const hebrewDate = jewishCalEnabled ? (hebrewCal?.getHebrewDateShort(day) || '') : '';
+            const holidays = jewishCalEnabled ? (hebrewCal?.getHolidaysForDate(day) || []) : [];
+            const topHoliday = holidays.find(ev => !(ev.getFlags() & 0x100)); // skip PARSHA
+            return (
+              <div key={index} className="text-center">
+                <div className="text-xs font-semibold text-muted-foreground">
+                  {hebrewCal?.parsedSettings?.hebrewMonthNames !== false
+                    ? HEBREW_WEEKDAY_SHORT[day.getDay()]
+                    : day.toLocaleDateString('en-US', { weekday: 'short' })
+                  }
+                </div>
+                <Button
+                  variant={isSelected(day) ? 'default' : isToday(day) ? 'outline' : 'ghost'}
+                  size="sm"
+                  className="w-full mt-1"
+                  onClick={() => onDateSelect(day)}
+                >
+                  <span className={isToday(day) && !isSelected(day) ? 'font-bold' : ''}>
+                    {day.getDate()}
+                  </span>
+                </Button>
+                <p className="text-[9px] text-muted-foreground/70 mt-0.5 leading-tight" dir="rtl">
+                  {hebrewDate}
+                </p>
+                {topHoliday && (
+                  <p className="text-[8px] text-red-600 font-medium truncate px-1" dir="rtl" title={topHoliday.render('he')}>
+                    {(() => { const n = topHoliday.render('he'); return n.length > 10 ? n.substring(0, 8) + '…' : n; })()}
+                  </p>
+                )}
               </div>
-              <Button
-                variant={isSelected(day) ? 'default' : isToday(day) ? 'outline' : 'ghost'}
-                size="sm"
-                className="w-full mt-1"
-                onClick={() => onDateSelect(day)}
-              >
-                <span className={isToday(day) && !isSelected(day) ? 'font-bold' : ''}>
-                  {day.getDate()}
-                </span>
-              </Button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
