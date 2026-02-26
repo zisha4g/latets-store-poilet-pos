@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { demoData } from '@/data/sample-demo-data';
@@ -68,11 +68,15 @@ export function useDataManagement(user, isDemo = false) {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const refreshTimerRef = useRef(null);
+  const initialLoadDone = useRef(false);
 
-  const refreshData = useCallback(async () => {
+  // Core fetch logic — showLoading controls whether the loading spinner appears
+  const fetchAllData = useCallback(async (showLoading = true) => {
     if (isDemo) {
         setData(demoData);
         setLoading(false);
+        initialLoadDone.current = true;
         return;
     }
     
@@ -81,7 +85,9 @@ export function useDataManagement(user, isDemo = false) {
         return;
     }
     
-    setLoading(true);
+    if (showLoading) {
+      setLoading(true);
+    }
     setError(null);
     
     try {
@@ -96,7 +102,9 @@ export function useDataManagement(user, isDemo = false) {
       const fetchedData = tables.reduce((acc, table, index) => {
         if (results[index].error) {
           console.error(`Error fetching ${table}:`, results[index].error);
-          toast({ title: `Error fetching data`, description: `Could not load ${table}.`, variant: "destructive" });
+          if (showLoading) {
+            toast({ title: `Error fetching data`, description: `Could not load ${table}.`, variant: "destructive" });
+          }
         }
         acc[table] = results[index].data || [];
         return acc;
@@ -136,6 +144,7 @@ export function useDataManagement(user, isDemo = false) {
         },
       });
 
+      initialLoadDone.current = true;
     } catch (error) {
       console.error("Error fetching initial data:", error);
       setError(error.message);
@@ -145,8 +154,21 @@ export function useDataManagement(user, isDemo = false) {
     }
   }, [user?.id, isDemo]);
 
+  // Initial load — shows spinner
+  const refreshData = useCallback(() => fetchAllData(true), [fetchAllData]);
+
+  // Silent refresh — debounced, no spinner. Multiple rapid calls collapse into one.
+  const silentRefresh = useCallback(() => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    refreshTimerRef.current = setTimeout(() => {
+      fetchAllData(false);
+      refreshTimerRef.current = null;
+    }, 300);
+  }, [fetchAllData]);
+
   useEffect(() => {
     refreshData();
+    return () => { if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current); };
   }, [refreshData]);
 
   const createHandlers = (table) => ({
@@ -163,35 +185,36 @@ export function useDataManagement(user, isDemo = false) {
     add: async (item) => {
       const { data: [newItem], error } = await supabase.from(table).insert({ ...item, user_id: user.id }).select();
       if (error) throw error;
-      await refreshData();
+      silentRefresh();
       return newItem;
     },
     update: async (item) => {
-      const { data: [updatedItem], error } = await supabase.from(table).update(item).eq('id', item.id).select();
+      const { id, ...updateFields } = item;
+      const { data: [updatedItem], error } = await supabase.from(table).update(updateFields).eq('id', id).select();
       if (error) throw error;
-      await refreshData();
+      silentRefresh();
       return updatedItem;
     },
     delete: async (id) => {
       const { error } = await supabase.from(table).delete().eq('id', id);
       if (error) throw error;
-      await refreshData();
+      silentRefresh();
     },
     batchUpdate: async (items) => {
         const { error } = await supabase.from(table).upsert(items);
         if (error) throw error;
-        await refreshData();
+        silentRefresh();
     },
     batchDelete: async (ids) => {
         const { error } = await supabase.from(table).delete().in('id', ids);
         if (error) throw error;
-        await refreshData();
+        silentRefresh();
     },
     upsert: async (items) => {
         const itemsToUpsert = Array.isArray(items) ? items : [items];
         const { error } = await supabase.from(table).upsert(itemsToUpsert.map(item => ({...item, user_id: user.id })));
         if (error) throw error;
-        await refreshData();
+        silentRefresh();
     },
   });
 
@@ -292,7 +315,7 @@ export function useDataManagement(user, isDemo = false) {
         update: async (setting) => {
             const { data: [updatedSetting], error } = await supabase.from('settings').upsert({ ...setting, user_id: user.id }, { onConflict: ['user_id', 'key'] }).select();
             if (error) throw error;
-            await refreshData();
+            silentRefresh();
             return updatedSetting;
         }
       },
@@ -305,7 +328,7 @@ export function useDataManagement(user, isDemo = false) {
         business_hours: { ...createHandlers('pbx_business_hours'), upsert: async (items) => {
             const { error } = await supabase.from('pbx_business_hours').upsert(items.map(i => ({...i, user_id: user.id})), {onConflict: ['user_id', 'day_of_week']});
             if (error) throw error;
-            await refreshData();
+            silentRefresh();
         }},
         ivr_menus: { ...createHandlers('pbx_ivr_menus') },
         audio_files: {
@@ -321,7 +344,7 @@ export function useDataManagement(user, isDemo = false) {
 
                 const { data: dbData, error: dbError } = await supabase.from('pbx_audio_files').insert({ user_id: user.id, name: file.name, file_url: publicUrl }).select();
                 if (dbError) throw dbError;
-                await refreshData();
+                silentRefresh();
                 return dbData;
             },
             delete: async(id) => {
@@ -338,7 +361,7 @@ export function useDataManagement(user, isDemo = false) {
         voicemails: { ...createHandlers('pbx_voicemails') },
       }
     };
-  }, [user?.id, refreshData, isDemo, data.pbxData?.audioFiles, data.taxes, data.service_charges]);
+  }, [user?.id, silentRefresh, isDemo, data.pbxData?.audioFiles, data.taxes, data.service_charges]);
 
   const customersWithStats = useMemo(() => {
     return (data.customers || []).map(customer => {
