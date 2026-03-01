@@ -116,15 +116,18 @@ export function getZmanimForDate(date, location, use12h = true, havdalahMins = 0
   if (!date || !location) return null;
   try {
     const zman = new Zmanim(location, date, false);
+    const sunriseDt = zman.sunrise();
+    // עלות השחר = 72 minutes before sunrise
+    const alotDt = new Date(sunriseDt.getTime() - 72 * 60 * 1000);
     // For tzeit: if havdalahMins > 0, use minutes after sunset; else use astronomical tzeit
     const sunsetDt = zman.sunset();
     const tzeitDt = havdalahMins > 0
       ? new Date(sunsetDt.getTime() + havdalahMins * 60 * 1000)
       : zman.tzeit();
     return {
-      alotHaShachar: formatTime(zman.alotHaShachar(), use12h),
+      alotHaShachar: formatTime(alotDt, use12h),
       misheyakir: formatTime(zman.misheyakir(), use12h),
-      sunrise: formatTime(zman.sunrise(), use12h),
+      sunrise: formatTime(sunriseDt, use12h),
       sofZmanShmaMGA: formatTime(zman.sofZmanShmaMGA(), use12h),
       sofZmanShma: formatTime(zman.sofZmanShma(), use12h),
       sofZmanTfilla: formatTime(zman.sofZmanTfilla(), use12h),

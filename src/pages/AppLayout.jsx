@@ -5,6 +5,7 @@ import { Helmet } from 'react-helmet-async';
 import { Toaster } from '@/components/ui/toaster';
 import Sidebar from '@/components/pos/Sidebar';
 import CallModal from '@/components/pos/pbx/CallModal';
+import { VirtualKeyboard } from '@/components/ui/VirtualKeyboard';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { useDataManagement } from '@/hooks/useDataManagement';
 import { useCart } from '@/hooks/useCart.jsx';
@@ -156,7 +157,7 @@ const AppLayout = ({ isDemo = false }) => {
       <div className="min-h-screen bg-secondary text-foreground">
         <div className="flex h-screen">
           <Sidebar isOnline={isOnline} settings={settings || {}} isDemo={isDemo} />
-          <main className="flex-1 overflow-hidden bg-background">
+          <main className="flex-1 overflow-hidden bg-background app-main transition-all duration-200">
             <Outlet context={outletContext} />
           </main>
         </div>
@@ -179,6 +180,10 @@ const AppLayout = ({ isDemo = false }) => {
           }}
           user={user}
           isDemo={isDemo}
+        />
+        <VirtualKeyboard 
+          theme={settings?.keyboardTheme?.value || 'dark'} 
+          enabled={settings?.virtualKeyboard?.value !== false && settings?.touchMode?.value !== true} 
         />
       </div>
     </>

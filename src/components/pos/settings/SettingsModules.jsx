@@ -2,7 +2,7 @@ import React from 'react';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { toast } from '@/components/ui/use-toast';
-import { FileText, Calculator, Keyboard } from 'lucide-react';
+import { FileText, Calculator, Keyboard, Monitor, Download } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -48,6 +48,20 @@ const SettingsModules = ({ settings, onUpdate }) => {
           />
         </div>
         <div className="flex items-center justify-between p-4 border rounded-lg">
+          <Label htmlFor="touch-mode-toggle" className="flex items-center space-x-3 cursor-pointer">
+            <Monitor className="w-5 h-5 text-primary" />
+            <div>
+              <div className="font-medium">Touch Mode POS</div>
+              <div className="text-xs text-muted-foreground">Tablet-optimized POS with large buttons &amp; built-in keyboard</div>
+            </div>
+          </Label>
+          <Switch
+            id="touch-mode-toggle"
+            checked={settings.touchMode?.value === true}
+            onCheckedChange={() => handleToggle('touchMode', settings.touchMode?.value === true)}
+          />
+        </div>
+        <div className="flex items-center justify-between p-4 border rounded-lg">
           <Label htmlFor="virtual-keyboard-toggle" className="flex items-center space-x-3 cursor-pointer">
             <Keyboard className="w-5 h-5 text-primary" />
             <div>
@@ -82,6 +96,23 @@ const SettingsModules = ({ settings, onUpdate }) => {
           </div>
         )}
       </div>
+
+      {/* Desktop App Download */}
+      {!window.electronAPI && (
+        <div className="mt-8">
+          <h3 className="text-xl font-semibold">Desktop App</h3>
+          <p className="text-muted-foreground mb-4">Download StorePilot as a standalone desktop application.</p>
+          <a
+            href="https://github.com/zisha4g/latets-store-poilet-pos/releases/latest/download/StorePilot.Setup.0.0.0.exe"
+            download
+            className="inline-flex items-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-xl font-semibold hover:opacity-90 transition-opacity"
+          >
+            <Download className="w-5 h-5" />
+            Download Desktop App
+          </a>
+          <p className="text-xs text-muted-foreground mt-2">Windows installer • Auto-updates included</p>
+        </div>
+      )}
     </div>
   );
 };

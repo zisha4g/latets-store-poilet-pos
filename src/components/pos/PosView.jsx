@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
-import { Search, ShoppingCart, CreditCard, Receipt, Save, UserPlus, Edit, Percent, Trash2 } from 'lucide-react';
+import { Search, ShoppingCart, CreditCard, Receipt, Save, UserPlus, Edit, Percent, Trash2, DollarSign } from 'lucide-react';
+import QuickAmountTiles from './pos-components/QuickAmountTiles';
 import { toast } from '@/components/ui/use-toast';
 import { useHotkeys } from '@/hooks/use-hotkeys';
 import CustomerLookup from './pos-components/CustomerLookup';
@@ -661,7 +662,14 @@ const PosView = ({ products, handlers, settings, savedCarts = [] }) => {
         </div>
       )}
 
-      <div className="flex-grow overflow-hidden flex flex-col bg-secondary rounded-xl">
+      <div className="flex-grow overflow-hidden flex gap-3 sm:gap-4">
+        {/* Left: Quick Amount Tiles */}
+        <div className="w-1/2 bg-secondary rounded-xl p-3 sm:p-4 overflow-y-auto">
+          <QuickAmountTiles onAddAmount={handleAddToCart} settings={settings} />
+        </div>
+
+        {/* Right: Cart */}
+        <div className="w-1/2 overflow-hidden flex flex-col bg-secondary rounded-xl">
         {saleState.cart.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-4">
             <ShoppingCart className="w-16 h-16 sm:w-24 sm:h-24 text-muted-foreground/10 mx-auto mb-4" />
@@ -682,6 +690,7 @@ const PosView = ({ products, handlers, settings, savedCarts = [] }) => {
             </AnimatePresence>
           </div>
         )}
+      </div>
       </div>
       <div className="pt-3 sm:pt-4 mt-auto">
         <ProductSearch

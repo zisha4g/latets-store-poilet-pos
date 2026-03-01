@@ -19,7 +19,9 @@ import {
   LayoutDashboard,
   Calendar,
   Menu,
-  X
+  X,
+  PanelLeftClose,
+  PanelLeftOpen
 } from 'lucide-react';
 import { useAuth } from '@/contexts/SupabaseAuthContext.jsx';
 import { Button } from '@/components/ui/button';
@@ -45,6 +47,7 @@ const Sidebar = ({ isOnline, settings, isDemo }) => {
   const navigate = useNavigate();
   const { isMobile } = useResponsive();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
 
   const handleSignOut = async () => {
     await signOut();
@@ -61,9 +64,7 @@ const Sidebar = ({ isOnline, settings, isDemo }) => {
   };
 
   const handleNavClick = () => {
-    if (isMobile) {
-      setMobileMenuOpen(false);
-    }
+    if (isMobile) setMobileMenuOpen(false);
   };
 
   const SidebarContent = () => (
@@ -75,16 +76,30 @@ const Sidebar = ({ isOnline, settings, isDemo }) => {
             {settings?.storeName?.value || 'StorePilot'}
           </h1>
         </div>
-        {isMobile && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setMobileMenuOpen(false)}
-            className="lg:hidden"
-          >
-            <X className="w-6 h-6" />
-          </Button>
-        )}
+        <div className="flex items-center gap-1">
+          {/* Collapse button (desktop only) */}
+          {!isMobile && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setCollapsed(true)}
+              title="Collapse sidebar"
+              className="hidden lg:flex"
+            >
+              <PanelLeftClose className="w-5 h-5" />
+            </Button>
+          )}
+          {isMobile && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setMobileMenuOpen(false)}
+              className="lg:hidden"
+            >
+              <X className="w-6 h-6" />
+            </Button>
+          )}
+        </div>
       </div>
       <nav className="flex-grow space-y-1 md:space-y-2 overflow-y-auto">
         {navItems.map((item) => {
@@ -148,11 +163,10 @@ const Sidebar = ({ isOnline, settings, isDemo }) => {
     </>
   );
 
-  // Mobile hamburger button
+  // Mobile — hamburger + overlay
   if (isMobile) {
     return (
       <>
-        {/* Mobile top bar */}
         <div className="fixed top-0 left-0 right-0 z-40 bg-card border-b px-4 py-3 flex items-center justify-between lg:hidden">
           <div className="flex items-center">
             <Home className="w-6 h-6 text-primary mr-2" />
@@ -169,7 +183,6 @@ const Sidebar = ({ isOnline, settings, isDemo }) => {
           </Button>
         </div>
 
-        {/* Mobile sidebar overlay */}
         {mobileMenuOpen && (
           <>
             <div 
@@ -185,7 +198,54 @@ const Sidebar = ({ isOnline, settings, isDemo }) => {
     );
   }
 
-  // Desktop sidebar
+  // Desktop — collapsed: show small expand button
+  if (collapsed) {
+    return (
+      <aside className="w-14 bg-card border-r flex flex-col items-center py-4 hidden lg:flex">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setCollapsed(false)}
+          title="Expand sidebar"
+          className="mb-4"
+        >
+          <PanelLeftOpen className="w-5 h-5" />
+        </Button>
+        <nav className="flex-grow space-y-2 overflow-y-auto">
+          {navItems.map((item) => {
+            if (item.setting && !settings?.[item.setting]?.value) return null;
+            const isActive = location.pathname.startsWith(item.to);
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                title={item.label}
+                className={`flex items-center justify-center w-10 h-10 rounded-lg transition-colors ${
+                  isActive ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                }`}
+                onMouseEnter={() => prefetchRoute(item.to)}
+              >
+                <item.icon className="w-5 h-5" />
+              </NavLink>
+            );
+          })}
+        </nav>
+        <div className="mt-auto space-y-2">
+          <NavLink
+            to="/app/settings"
+            title="Settings"
+            className={`flex items-center justify-center w-10 h-10 rounded-lg transition-colors ${
+              location.pathname.startsWith('/app/settings') ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+            }`}
+          >
+            <Settings className="w-5 h-5" />
+          </NavLink>
+        </div>
+      </aside>
+    );
+  }
+
+  // Desktop — full sidebar
   return (
     <aside className="w-64 xl:w-72 2xl:w-80 bg-card border-r flex flex-col p-4 hidden lg:flex">
       <SidebarContent />

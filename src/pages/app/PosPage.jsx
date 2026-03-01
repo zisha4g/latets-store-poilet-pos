@@ -1,6 +1,7 @@
 import React from 'react';
 import { useOutletContext } from 'react-router-dom';
 import PosView from '@/components/pos/PosView';
+import TouchPosView from '@/components/pos/TouchPosView';
 import { Button } from '@/components/ui/button';
 
 // This component acts as the "SafeOutletContextWrapper" requested
@@ -65,8 +66,10 @@ const PosPage = () => {
     
     // 7. Error Boundary for PosView
     try {
+        const isTouchMode = settings?.touchMode?.value === true;
+        const ViewComponent = isTouchMode ? TouchPosView : PosView;
         return (
-          <PosView 
+          <ViewComponent 
             products={products} 
             handlers={handlers} 
             settings={settings} 

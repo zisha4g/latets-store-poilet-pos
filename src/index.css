@@ -148,3 +148,26 @@
 .ifields-frame:focus {
   outline: none;
 }
+
+/* Virtual keyboard open — shrink main content area & limit dropdowns */
+body.vk-open .app-main {
+  height: calc(100vh - 175px) !important;
+  max-height: calc(100vh - 175px) !important;
+}
+body.vk-open [data-radix-popper-content-wrapper] {
+  max-height: calc(100vh - 250px) !important;
+}
+body.vk-open #product-search-list {
+  max-height: 25vh !important;
+}
+
+/* Touch-friendly buttons for POS */
+.touch-manipulation {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Cart items compact styling */
+.cart-item + .cart-item {
+  border-top: 1px solid hsl(var(--border) / 0.5);
+}

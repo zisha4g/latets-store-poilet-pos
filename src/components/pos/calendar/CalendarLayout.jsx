@@ -305,6 +305,8 @@ const CalendarLayout = ({ appointments = [], tasks = [], handlers = {}, refreshD
               {jewishCalEnabled && (() => {
                 const holidays = hebrewCal.getHolidaysForDate(selectedDate);
                 if (holidays.length === 0) return null;
+                // Pre-compute zmanim for overriding fast begin/end times
+                const zmanimForFast = hebrewCal.getZmanim(selectedDate);
                 return (
                   <div className="mb-4">
                     <h4 className="font-semibold text-sm text-muted-foreground mb-2">
@@ -314,7 +316,16 @@ const CalendarLayout = ({ appointments = [], tasks = [], handlers = {}, refreshD
                     <div className="space-y-2">
                       {holidays.map((ev, i) => {
                         const colors = getHolidayColor(ev);
-                        const hebrewName = ev.render('he') || ev.render();
+                        const desc = ev.getDesc();
+                        let hebrewName = ev.render('he') || ev.render();
+                        // Override hebcal's fast begin/end times with our calculation
+                        if (zmanimForFast) {
+                          if (desc === 'Fast begins') {
+                            hebrewName = `\u05ea\u05d7\u05d9\u05dc\u05ea \u05d4\u05e6\u05d5\u05dd: ${zmanimForFast.alotHaShachar}`;
+                          } else if (desc === 'Fast ends') {
+                            hebrewName = `\u05e1\u05d9\u05d5\u05dd \u05d4\u05e6\u05d5\u05dd: ${zmanimForFast.tzeit}`;
+                          }
+                        }
                         return (
                           <div key={`heb-${i}`} className={`p-2 rounded border ${colors.bg} ${colors.border}`} dir="rtl">
                             <div className="flex items-center justify-between gap-2">
