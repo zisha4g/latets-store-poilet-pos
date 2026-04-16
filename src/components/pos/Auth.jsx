@@ -16,9 +16,10 @@ const Auth = ({ mode = 'login' }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const isLogin = mode === 'login';
+  const isElectron = typeof window !== 'undefined' && window.electronAPI?.isElectron;
 
   useEffect(() => {
-    if (!isLogin) return;
+    if (!isLogin || isElectron) return;
     const clearSession = async () => {
       try {
         await signOut();
@@ -27,7 +28,7 @@ const Auth = ({ mode = 'login' }) => {
       }
     };
     clearSession();
-  }, [isLogin, signOut]);
+  }, [isElectron, isLogin, signOut]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -46,7 +47,7 @@ const Auth = ({ mode = 'login' }) => {
         description: 'Redirecting...',
       });
 
-      const redirectTo = location.state?.from ?? '/app';
+      const redirectTo = location.state?.from ?? (isElectron ? '/selfcheckout' : '/app');
       navigate(redirectTo, { replace: true });
     } catch (authError) {
       toast({
@@ -61,11 +62,13 @@ const Auth = ({ mode = 'login' }) => {
 
   return (
     <div className="w-full h-screen flex flex-col items-center justify-center bg-gray-100 dark:bg-gray-900 px-4">
-      <div className="absolute top-6 left-6">
-        <Button asChild variant="outline">
-          <Link to="/">← Back to Home</Link>
-        </Button>
-      </div>
+      {!location.state?.kioskMode && (
+        <div className="absolute top-6 left-6">
+          <Button asChild variant="outline">
+            <Link to="/">← Back to Home</Link>
+          </Button>
+        </div>
+      )}
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}

@@ -10,7 +10,7 @@
     "preview": "vite preview --host :: --port 3000",
     "lint": "eslint . --quiet",
     "electron": "electron .",
-    "electron:build": "electron-builder --win",
+    "electron:build": "npm run build && electron-builder --win",
     "electron:build:mac": "electron-builder --mac",
     "electron:build:linux": "electron-builder --linux"
   },
@@ -21,6 +21,8 @@
       "output": "electron-dist"
     },
     "files": [
+      "dist/**/*",
+      "package.json",
       "electron/**/*"
     ],
     "win": {
