@@ -2,7 +2,10 @@ import React from 'react';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { toast } from '@/components/ui/use-toast';
-import { FileText, Calculator, Keyboard, Monitor, Download } from 'lucide-react';
+import {
+  LayoutDashboard, ShoppingCart, FileText, Package, Users, Calendar,
+  Truck, BarChart2, Banknote, Keyboard, Download
+} from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -11,9 +14,22 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+const SIDEBAR_MODULES = [
+  { key: 'enableDashboard',  icon: LayoutDashboard, label: 'Dashboard' },
+  { key: 'enablePOS',        icon: ShoppingCart,    label: 'POS' },
+  { key: 'enableOrders',     icon: FileText,        label: 'Orders' },
+  { key: 'enableInventory',  icon: Package,         label: 'Inventory' },
+  { key: 'enableCustomers',  icon: Users,           label: 'Customers' },
+  { key: 'enableCalendar',   icon: Calendar,        label: 'Calendar' },
+  { key: 'enableInvoicing',  icon: FileText,        label: 'Invoices' },
+  { key: 'enablePurchasing', icon: Truck,           label: 'Purchasing' },
+  { key: 'enableReports',    icon: BarChart2,       label: 'Reports' },
+  { key: 'enableAccounting', icon: Banknote,        label: 'Accounting' },
+];
+
 const SettingsModules = ({ settings, onUpdate }) => {
-  const handleToggle = (key, value) => {
-    onUpdate({ key, value: !value })
+  const handleToggle = (key, currentValue) => {
+    onUpdate({ key, value: !currentValue })
       .then(() => toast({ title: "Module setting updated" }))
       .catch(err => toast({ title: "Error", description: err.message, variant: "destructive" }));
   };
@@ -21,85 +37,74 @@ const SettingsModules = ({ settings, onUpdate }) => {
   return (
     <div className="space-y-8">
       <div>
-        <h3 className="text-xl font-semibold">Modules</h3>
-        <p className="text-muted-foreground">Enable or disable major features of the application.</p>
+        <h3 className="text-xl font-semibold">Sidebar Modules</h3>
+        <p className="text-muted-foreground">Enable or disable each sidebar section independently.</p>
       </div>
-      <div className="space-y-6 max-w-lg">
-        <div className="flex items-center justify-between p-4 border rounded-lg">
-          <Label htmlFor="invoicing-toggle" className="flex items-center space-x-3 cursor-pointer">
-            <FileText className="w-5 h-5 text-primary" />
-            <span className="font-medium">Invoicing Module</span>
-          </Label>
-          <Switch
-            id="invoicing-toggle"
-            checked={settings.enableInvoicing?.value}
-            onCheckedChange={() => handleToggle('enableInvoicing', settings.enableInvoicing?.value)}
-          />
-        </div>
-        <div className="flex items-center justify-between p-4 border rounded-lg">
-          <Label htmlFor="accounting-toggle" className="flex items-center space-x-3 cursor-pointer">
-            <Calculator className="w-5 h-5 text-primary" />
-            <span className="font-medium">Accounting Module</span>
-          </Label>
-          <Switch
-            id="accounting-toggle"
-            checked={settings.enableAccounting?.value}
-            onCheckedChange={() => handleToggle('enableAccounting', settings.enableAccounting?.value)}
-          />
-        </div>
-        <div className="flex items-center justify-between p-4 border rounded-lg">
-          <Label htmlFor="touch-mode-toggle" className="flex items-center space-x-3 cursor-pointer">
-            <Monitor className="w-5 h-5 text-primary" />
-            <div>
-              <div className="font-medium">Touch Mode POS</div>
-              <div className="text-xs text-muted-foreground">Tablet-optimized POS with large buttons &amp; built-in keyboard</div>
+
+      <div className="space-y-3 max-w-lg">
+        {SIDEBAR_MODULES.map(({ key, icon: Icon, label }) => {
+          const isEnabled = settings[key]?.value !== false;
+          return (
+            <div key={key} className="flex items-center justify-between p-4 border rounded-lg">
+              <Label htmlFor={`${key}-toggle`} className="flex items-center space-x-3 cursor-pointer">
+                <Icon className="w-5 h-5 text-primary" />
+                <span className="font-medium">{label}</span>
+              </Label>
+              <Switch
+                id={`${key}-toggle`}
+                checked={isEnabled}
+                onCheckedChange={() => handleToggle(key, isEnabled)}
+              />
             </div>
-          </Label>
-          <Switch
-            id="touch-mode-toggle"
-            checked={settings.touchMode?.value === true}
-            onCheckedChange={() => handleToggle('touchMode', settings.touchMode?.value === true)}
-          />
-        </div>
-        <div className="flex items-center justify-between p-4 border rounded-lg">
-          <Label htmlFor="virtual-keyboard-toggle" className="flex items-center space-x-3 cursor-pointer">
-            <Keyboard className="w-5 h-5 text-primary" />
-            <div>
-              <div className="font-medium">Virtual Keyboard</div>
-              <div className="text-xs text-muted-foreground">Touch-friendly on-screen keyboard for POS</div>
-            </div>
-          </Label>
-          <Switch
-            id="virtual-keyboard-toggle"
-            checked={settings.virtualKeyboard?.value !== false}
-            onCheckedChange={() => handleToggle('virtualKeyboard', settings.virtualKeyboard?.value !== false)}
-          />
-        </div>
-        {settings.virtualKeyboard?.value !== false && (
-          <div className="ml-4 p-4 border rounded-lg bg-muted/30">
-            <Label htmlFor="keyboard-theme" className="text-sm font-medium mb-2 block">Keyboard Theme</Label>
-            <Select 
-              value={settings.keyboardTheme?.value || 'dark'} 
-              onValueChange={(value) => onUpdate({ key: 'keyboardTheme', value })
-                .then(() => toast({ title: "Keyboard theme updated" }))
-                .catch(err => toast({ title: "Error", description: err.message, variant: "destructive" }))}
-            >
-              <SelectTrigger id="keyboard-theme" className="w-48">
-                <SelectValue placeholder="Select theme" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="dark">Dark</SelectItem>
-                <SelectItem value="light">Light</SelectItem>
-                <SelectItem value="blue">Blue</SelectItem>
-              </SelectContent>
-            </Select>
+          );
+        })}
+      </div>
+
+      {/* Virtual Keyboard */}
+      <div>
+        <h3 className="text-xl font-semibold">Virtual Keyboard</h3>
+        <p className="text-muted-foreground mb-4">Touch-friendly on-screen keyboard for POS.</p>
+        <div className="space-y-3 max-w-lg">
+          <div className="flex items-center justify-between p-4 border rounded-lg">
+            <Label htmlFor="virtual-keyboard-toggle" className="flex items-center space-x-3 cursor-pointer">
+              <Keyboard className="w-5 h-5 text-primary" />
+              <div>
+                <div className="font-medium">Virtual Keyboard</div>
+                <div className="text-xs text-muted-foreground">Enable touch-friendly keyboard</div>
+              </div>
+            </Label>
+            <Switch
+              id="virtual-keyboard-toggle"
+              checked={settings.virtualKeyboard?.value !== false}
+              onCheckedChange={() => handleToggle('virtualKeyboard', settings.virtualKeyboard?.value !== false)}
+            />
           </div>
-        )}
+          {settings.virtualKeyboard?.value !== false && (
+            <div className="ml-4 p-4 border rounded-lg bg-muted/30">
+              <Label htmlFor="keyboard-theme" className="text-sm font-medium mb-2 block">Keyboard Theme</Label>
+              <Select
+                value={settings.keyboardTheme?.value || 'dark'}
+                onValueChange={(value) => onUpdate({ key: 'keyboardTheme', value })
+                  .then(() => toast({ title: "Keyboard theme updated" }))
+                  .catch(err => toast({ title: "Error", description: err.message, variant: "destructive" }))}
+              >
+                <SelectTrigger id="keyboard-theme" className="w-48">
+                  <SelectValue placeholder="Select theme" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="dark">Dark</SelectItem>
+                  <SelectItem value="light">Light</SelectItem>
+                  <SelectItem value="blue">Blue</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Desktop App Download */}
       {!window.electronAPI && (
-        <div className="mt-8">
+        <div>
           <h3 className="text-xl font-semibold">Desktop App</h3>
           <p className="text-muted-foreground mb-4">Download StorePilot as a standalone desktop application.</p>
           <a

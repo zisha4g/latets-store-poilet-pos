@@ -3,10 +3,11 @@ import React, { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useAuth } from '@/contexts/SupabaseAuthContext.jsx';
-import { Upload, X, Plus, Trash2, DollarSign } from 'lucide-react';
+import { Upload, X, Plus, Monitor } from 'lucide-react';
 import { DEFAULT_TILES } from '@/components/pos/pos-components/QuickAmountTiles';
 
 const SettingsGeneral = ({ settings, onUpdate }) => {
@@ -19,6 +20,8 @@ const SettingsGeneral = ({ settings, onUpdate }) => {
   const fileInputRef = useRef(null);
 
   const [tiles, setTiles] = useState(settings.quickAmountTiles?.value || DEFAULT_TILES);
+  const [skipCustomerPrompt, setSkipCustomerPrompt] = useState(settings.skipCustomerPrompt?.value || false);
+  const [touchMode, setTouchMode] = useState(settings.touchMode?.value === true);
   const [newTileLabel, setNewTileLabel] = useState('');
   const [newTileAmount, setNewTileAmount] = useState('');
 
@@ -28,6 +31,8 @@ const SettingsGeneral = ({ settings, onUpdate }) => {
       onUpdate({ key: 'storeAddress', value: storeAddress }),
       onUpdate({ key: 'storeEmail', value: storeEmail }),
       onUpdate({ key: 'quickAmountTiles', value: tiles }),
+      onUpdate({ key: 'skipCustomerPrompt', value: skipCustomerPrompt }),
+      onUpdate({ key: 'touchMode', value: touchMode }),
     ]).then(() => {
       toast({ title: "Store profile updated successfully!" });
     }).catch(err => {
@@ -111,6 +116,35 @@ const SettingsGeneral = ({ settings, onUpdate }) => {
           <Upload className="w-4 h-4 mr-2" /> {isUploading ? 'Uploading...' : 'Upload Logo'}
         </Button>
         <input type="file" ref={fileInputRef} onChange={handleLogoUpload} className="hidden" accept="image/png, image/jpeg" />
+      </div>
+
+      {/* POS Behavior */}
+      <div>
+        <h3 className="text-xl font-semibold">POS Behavior</h3>
+        <p className="text-muted-foreground">Configure how the Point of Sale behaves.</p>
+      </div>
+      <div className="grid gap-4 max-w-3xl md:grid-cols-2">
+        <div className="flex items-center justify-between rounded-lg border p-4">
+          <div className="space-y-0.5">
+            <Label className="text-base">Skip Customer Prompt</Label>
+            <p className="text-sm text-muted-foreground">Go directly to scanning items without selecting a customer first.</p>
+          </div>
+          <Switch checked={skipCustomerPrompt} onCheckedChange={setSkipCustomerPrompt} />
+        </div>
+        <div className="flex items-center justify-between rounded-lg border p-4">
+          <Label htmlFor="touch-mode-toggle" className="flex items-center space-x-3 cursor-pointer">
+            <Monitor className="w-5 h-5 text-primary" />
+            <div>
+              <div className="font-medium">Touch Mode POS</div>
+              <div className="text-xs text-muted-foreground">Tablet-optimized POS with large buttons and keyboard.</div>
+            </div>
+          </Label>
+          <Switch
+            id="touch-mode-toggle"
+            checked={touchMode}
+            onCheckedChange={setTouchMode}
+          />
+        </div>
       </div>
 
       {/* Quick Amount Tiles */}

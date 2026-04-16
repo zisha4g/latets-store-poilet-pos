@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
 import SolaCardForm from './SolaCardForm';
+import CardReaderSwipe from './CardReaderSwipe';
 
 
 const CheckoutModal = ({ isOpen, onOpenChange, cart, total = 0, subtotal = 0, onSave, taxes = [], serviceCharges = [], customer }) => {
@@ -90,12 +91,15 @@ const CheckoutModal = ({ isOpen, onOpenChange, cart, total = 0, subtotal = 0, on
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 py-4">
           <div className="space-y-6 rounded-2xl border border-border bg-background p-6 shadow-sm">
             <Tabs defaultValue="cash" className="space-y-5">
-              <TabsList className="grid grid-cols-2 rounded-xl bg-muted/70 p-1">
+              <TabsList className="grid grid-cols-3 rounded-xl bg-muted/70 p-1">
                 <TabsTrigger value="cash" className="rounded-lg text-sm font-semibold data-[state=active]:bg-background data-[state=active]:shadow-sm">
                   Cash
                 </TabsTrigger>
                 <TabsTrigger value="card" className="rounded-lg text-sm font-semibold data-[state=active]:bg-background data-[state=active]:shadow-sm">
                   Card
+                </TabsTrigger>
+                <TabsTrigger value="swipe" className="rounded-lg text-sm font-semibold data-[state=active]:bg-background data-[state=active]:shadow-sm">
+                  Swipe
                 </TabsTrigger>
               </TabsList>
               <TabsContent value="cash" className="space-y-4">
@@ -149,6 +153,19 @@ const CheckoutModal = ({ isOpen, onOpenChange, cart, total = 0, subtotal = 0, on
                   onPaymentSuccess={(details) => {
                     onSave({
                       paymentMethod: 'card',
+                      refNum: details?.refNum,
+                      token: details?.token,
+                    });
+                  }}
+                />
+              </TabsContent>
+              <TabsContent value="swipe">
+                <CardReaderSwipe
+                  amount={total}
+                  customer={customer}
+                  onPaymentSuccess={(details) => {
+                    onSave({
+                      paymentMethod: 'card_reader',
                       refNum: details?.refNum,
                       token: details?.token,
                     });

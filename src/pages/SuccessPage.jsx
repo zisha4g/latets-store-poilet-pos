@@ -1,11 +1,12 @@
 import React from 'react';
 import { Helmet } from 'react-helmet-async';
-import { Link } from 'react-router-dom';
+import { Link, useOutletContext } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { CheckCircle, ArrowRight } from 'lucide-react';
 
 const SuccessPage = () => {
+  const { storeId } = useOutletContext();
   return (
     <>
       <Helmet>
@@ -25,8 +26,8 @@ const SuccessPage = () => {
             Thank you for your order. We've received your payment and are getting your items ready for you.
           </p>
           <Button asChild size="lg">
-            <Link to="/store">
-              Continue Shopping <ArrowRight className="ml-2 h-5 w-5" />
+            <Link to={storeId ? `/s/${storeId}/selfcheckout` : '/store'}>
+              Continue <ArrowRight className="ml-2 h-5 w-5" />
             </Link>
           </Button>
         </motion.div>

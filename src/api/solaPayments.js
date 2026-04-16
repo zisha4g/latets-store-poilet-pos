@@ -17,3 +17,13 @@ export const chargeSolaCard = async (payload) => {
   }
   return data;
 };
+
+export const chargeSolaSwipe = async (payload) => {
+  const { data, error } = await supabase.functions.invoke('sola-charge', {
+    body: payload,
+  });
+  if (error) {
+    throw error;
+  }
+  return data;
+};

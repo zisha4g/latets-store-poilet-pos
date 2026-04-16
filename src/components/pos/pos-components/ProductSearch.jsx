@@ -5,40 +5,96 @@ import {
   PopoverContent,
   PopoverTrigger
 } from '@/components/ui/popover';
-import { Search, PlusCircle } from 'lucide-react';
+import { Search, PlusCircle, UserPlus, User } from 'lucide-react';
+
+const isPhoneNumber = (val) => /^\d{7}$|^\d{10}$/.test(val);
 
 const ProductSearch = forwardRef(
-  ({ products, searchValue, setSearchValue, onAddToCart, onAddNewProduct }, ref) => {
+  ({ products, searchValue, setSearchValue, onAddToCart, onAddNewProduct, onCustomerFound, onAddNewCustomer, findCustomerByPhone }, ref) => {
     const [open, setOpen] = useState(false);
     const inputRef = useRef(null);
     const autoEnterTimer = useRef(null);
     const isScannedInput = useRef(false);
+    const [customerMatch, setCustomerMatch] = useState(null);
+    const [customerSearching, setCustomerSearching] = useState(false);
 
-    // Simple check if input might be from scanner
+    // Scanner speed detection — track keystroke timing
+    const keystrokeTimestamps = useRef([]);
+    const SCANNER_SPEED_THRESHOLD = 80; // ms between keystrokes — scanners are <50ms, humans >100ms
+
     const checkIfScanned = (value) => {
-      isScannedInput.current = /^\d+$/.test(value) && value.length >= BARCODE_MIN_LENGTH;
+      const times = keystrokeTimestamps.current;
+      if (times.length >= 3) {
+        const avgGap = (times[times.length - 1] - times[0]) / (times.length - 1);
+        isScannedInput.current = avgGap < SCANNER_SPEED_THRESHOLD;
+      } else {
+        isScannedInput.current = false;
+      }
       return isScannedInput.current;
     };
 
-    // Monitor searchValue changes and auto-enter after delay
+    // Monitor searchValue changes and auto-enter after delay (barcode scanner)
     useEffect(() => {
-      // Only use timer for manual input (when not detected as scanner)
-      if (!isScannedInput.current && /^\d+$/.test(searchValue) && searchValue.length >= BARCODE_MIN_LENGTH) {
+      const value = (searchValue || '').trim();
+      const isAllDigits = /^\d+$/.test(value);
+      const couldBePhone = isAllDigits && value.length <= 10;
+      const normalizedValue = value.toLowerCase();
+      const hasExactProductMatch = products.some((p) => {
+        const barcode = String(p.barcode || '').toLowerCase();
+        const sku = String(p.sku || '').toLowerCase();
+        return barcode === normalizedValue || sku === normalizedValue;
+      });
+
+      if (!value || value.length < BARCODE_MIN_LENGTH) {
+        if (autoEnterTimer.current) clearTimeout(autoEnterTimer.current);
+        return;
+      }
+
+      if (hasExactProductMatch && !couldBePhone) {
+        // Always auto-enter exact product scans, including alphanumeric SKUs.
         if (autoEnterTimer.current) clearTimeout(autoEnterTimer.current);
         autoEnterTimer.current = setTimeout(() => {
-          autoEnter(searchValue);
-        }, 250);
+          autoEnter(value);
+        }, 180);
+      } else if (isScannedInput.current && !couldBePhone) {
+        // Fast scanner-like input should auto-enter even when not numeric.
+        if (autoEnterTimer.current) clearTimeout(autoEnterTimer.current);
+        autoEnterTimer.current = setTimeout(() => {
+          autoEnter(value);
+        }, 220);
+      } else if (!isScannedInput.current && isAllDigits && value.length > 10) {
+        // Manual input but clearly not a phone number — auto-enter.
+        if (autoEnterTimer.current) clearTimeout(autoEnterTimer.current);
+        autoEnterTimer.current = setTimeout(() => {
+          autoEnter(value);
+        }, 300);
       }
+
       return () => {
         if (autoEnterTimer.current) clearTimeout(autoEnterTimer.current);
       };
-    }, [searchValue]);
+    }, [searchValue, products]);
 
     const popoverRef = useRef(null);
     const [selectedIndex, setSelectedIndex] = useState(0);
 
     const itemsRef = useRef([]);
     const addNewProductRef = useRef(null);
+
+    // Customer search when phone number detected
+    useEffect(() => {
+      if (!findCustomerByPhone || !isPhoneNumber(searchValue.trim())) {
+        setCustomerMatch(null);
+        return;
+      }
+      setCustomerSearching(true);
+      const timer = setTimeout(async () => {
+        const result = await findCustomerByPhone(searchValue.trim());
+        setCustomerMatch(result);
+        setCustomerSearching(false);
+      }, 300);
+      return () => { clearTimeout(timer); setCustomerSearching(false); };
+    }, [searchValue, findCustomerByPhone]);
 
 
     // --- Barcode auto-enter state ---
@@ -48,15 +104,18 @@ const ProductSearch = forwardRef(
     // --- Auto-enter on input or scan ---
     const handleInput = (e) => {
       const value = e.target.value;
+      keystrokeTimestamps.current.push(Date.now());
+      if (keystrokeTimestamps.current.length > 10) keystrokeTimestamps.current.shift();
       setSearchValue(value);
       checkIfScanned(value);
     };
 
     // ------------------ AUTO ENTER ------------------
-    const autoEnter = (value) => {
+    const autoEnter = async (value) => {
+      const normalizedValue = String(value || '').trim().toLowerCase();
       const exactMatch = products.find(p =>
-        String(p.barcode) === value ||
-        String(p.sku) === value
+        String(p.barcode || '').toLowerCase() === normalizedValue ||
+        String(p.sku || '').toLowerCase() === normalizedValue
       );
       if (exactMatch) {
         handleProductSelect(exactMatch);
@@ -64,6 +123,30 @@ const ProductSearch = forwardRef(
         handleProductSelect(filteredProducts[0]);
       } else if (filteredProducts.length > 0 && filteredProducts[selectedIndex]) {
         handleProductSelect(filteredProducts[selectedIndex]);
+      } else if (isPhoneNumber(value) && findCustomerByPhone) {
+        // Phone number with no product match — search customer and auto-attach
+        const result = await findCustomerByPhone(value);
+        if (result && !result.multiple && onCustomerFound) {
+          onCustomerFound(result);
+          setOpen(false);
+          setSelectedIndex(0);
+          setSearchValue('');
+          setCustomerMatch(null);
+          return;
+        } else if (result?.multiple && result.matches.length > 0 && onCustomerFound) {
+          onCustomerFound(result.matches[0]);
+          setOpen(false);
+          setSelectedIndex(0);
+          setSearchValue('');
+          setCustomerMatch(null);
+          return;
+        }
+        // No customer found either — fall through to add new
+        if (onAddNewProduct) {
+          onAddNewProduct(value);
+          setOpen(false);
+          setSelectedIndex(0);
+        }
       } else if (value.length > 0 && onAddNewProduct) {
         onAddNewProduct(value);
         setOpen(false);
@@ -82,8 +165,9 @@ const ProductSearch = forwardRef(
         )
       )
       .sort((a, b) => {
-        const aExact = String(a.barcode) === searchValue || String(a.sku) === searchValue;
-        const bExact = String(b.barcode) === searchValue || String(b.sku) === searchValue;
+        const normalizedSearch = String(searchValue || '').toLowerCase();
+        const aExact = String(a.barcode || '').toLowerCase() === normalizedSearch || String(a.sku || '').toLowerCase() === normalizedSearch;
+        const bExact = String(b.barcode || '').toLowerCase() === normalizedSearch || String(b.sku || '').toLowerCase() === normalizedSearch;
         if (aExact && !bExact) return -1;
         if (!aExact && bExact) return 1;
         return 0;
@@ -117,6 +201,7 @@ const ProductSearch = forwardRef(
         setOpen(false);
         setSearchValue('');
         setSelectedIndex(0);
+        keystrokeTimestamps.current = [];
       }
     };
 
@@ -206,8 +291,56 @@ const ProductSearch = forwardRef(
         >
           <div id="product-search-list" role="listbox" className="text-gray-800 max-h-96 overflow-y-auto">
             {filteredProducts.length === 0 && searchValue.length > 0 ? (
-              <div className="text-center py-4 px-4">
-                <p className="mb-4">No product found for "{searchValue}".</p>
+              <div className="text-center py-4 px-4 space-y-3">
+                <p className="mb-2">No product found for "{searchValue}".</p>
+
+                {/* Customer match */}
+                {customerMatch && !customerMatch.multiple && onCustomerFound && (
+                  <div
+                    onClick={() => {
+                      onCustomerFound(customerMatch);
+                      setSearchValue('');
+                      setOpen(false);
+                      setCustomerMatch(null);
+                    }}
+                    className="cursor-pointer hover:bg-accent flex items-center justify-center py-2 px-3 rounded border border-green-300 bg-green-50 text-green-900 font-medium transition-colors"
+                    style={{ boxShadow: '0 0 0 1px #86efac' }}
+                  >
+                    <User className="w-4 h-4 mr-2" />
+                    Attach customer: {customerMatch.name} ({customerMatch.phone})
+                  </div>
+                )}
+                {customerMatch?.multiple && onCustomerFound && customerMatch.matches.map((c) => (
+                  <div
+                    key={c.id}
+                    onClick={() => {
+                      onCustomerFound(c);
+                      setSearchValue('');
+                      setOpen(false);
+                      setCustomerMatch(null);
+                    }}
+                    className="cursor-pointer hover:bg-accent flex items-center justify-center py-2 px-3 rounded border border-green-300 bg-green-50 text-green-900 font-medium transition-colors"
+                  >
+                    <User className="w-4 h-4 mr-2" />
+                    Attach: {c.name} ({c.phone})
+                  </div>
+                ))}
+
+                {/* Add as new customer (phone numbers only) */}
+                {isPhoneNumber(searchValue.trim()) && !customerMatch && !customerSearching && onAddNewCustomer && (
+                  <div
+                    onClick={() => {
+                      onAddNewCustomer(searchValue.trim());
+                      setSearchValue('');
+                      setOpen(false);
+                    }}
+                    className="cursor-pointer hover:bg-accent flex items-center justify-center py-2 px-3 rounded border transition-colors border-transparent hover:border-blue-300"
+                  >
+                    <UserPlus className="w-4 h-4 mr-2" />
+                    Add "{searchValue}" as new customer
+                  </div>
+                )}
+
                 {onAddNewProduct && (
                   <div
                     onClick={() => {

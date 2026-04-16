@@ -29,15 +29,15 @@ import { useResponsive } from '@/lib/responsive';
 import { prefetchRoute } from '@/lib/prefetch';
 
 const navItems = [
-  { to: '/app/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/app/pos', icon: ShoppingCart, label: 'POS' },
-  { to: '/app/orders', icon: FileText, label: 'Orders' },
-  { to: '/app/inventory', icon: Package, label: 'Inventory' },
-  { to: '/app/customers', icon: Users, label: 'Customers' },
-  { to: '/app/calendar', icon: Calendar, label: 'Calendar' },
+  { to: '/app/dashboard', icon: LayoutDashboard, label: 'Dashboard', setting: 'enableDashboard' },
+  { to: '/app/pos', icon: ShoppingCart, label: 'POS', setting: 'enablePOS' },
+  { to: '/app/orders', icon: FileText, label: 'Orders', setting: 'enableOrders' },
+  { to: '/app/inventory', icon: Package, label: 'Inventory', setting: 'enableInventory' },
+  { to: '/app/customers', icon: Users, label: 'Customers', setting: 'enableCustomers' },
+  { to: '/app/calendar', icon: Calendar, label: 'Calendar', setting: 'enableCalendar' },
   { to: '/app/invoices', icon: FileText, label: 'Invoices', setting: 'enableInvoicing' },
-  { to: '/app/purchasing', icon: Truck, label: 'Purchasing', setting: 'enableAccounting' },
-  { to: '/app/reports', icon: BarChart2, label: 'Reports' },
+  { to: '/app/purchasing', icon: Truck, label: 'Purchasing', setting: 'enablePurchasing' },
+  { to: '/app/reports', icon: BarChart2, label: 'Reports', setting: 'enableReports' },
   { to: '/app/accounting', icon: Banknote, label: 'Accounting', setting: 'enableAccounting' },
 ];
 
@@ -103,7 +103,7 @@ const Sidebar = ({ isOnline, settings, isDemo }) => {
       </div>
       <nav className="flex-grow space-y-1 md:space-y-2 overflow-y-auto">
         {navItems.map((item) => {
-          if (item.setting && !settings?.[item.setting]?.value) {
+          if (item.setting && settings?.[item.setting]?.value === false) {
             return null;
           }
           return (

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 
 const LoadingFallback = () => (
@@ -13,13 +13,14 @@ const LoadingFallback = () => (
 
 export const ProtectedRoute = ({ children, redirectTo = '/login' }) => {
   const { user, loading } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return <LoadingFallback />;
   }
 
   if (!user) {
-    return <Navigate to={redirectTo} replace />;
+    return <Navigate to={redirectTo} replace state={{ from: location.pathname }} />;
   }
 
   return children;

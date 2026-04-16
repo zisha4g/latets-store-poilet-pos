@@ -25,7 +25,9 @@ import StripeCallbackPage from '@/pages/StripeCallbackPage.jsx';
 import StoreLayout from '@/pages/StoreLayout.jsx';
 import ProductsListPage from '@/pages/ProductsListPage.jsx';
 import ProductDetailPage from '@/pages/ProductDetailPage.jsx';
+import SelfCheckoutPage from '@/pages/SelfCheckoutPage.jsx';
 import SuccessPage from '@/pages/SuccessPage.jsx';
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute.jsx';
 
 
 import '@/index.css';
@@ -94,6 +96,41 @@ const router = createBrowserRouter([
   },
   {
     path: "/success",
+    element: <StoreLayout />,
+    children: [
+      { index: true, element: <SuccessPage /> },
+    ]
+  },
+  {
+    path: "/selfcheckout",
+    element: <ProtectedRoute><StoreLayout /></ProtectedRoute>,
+    children: [
+      { index: true, element: <SelfCheckoutPage /> },
+    ]
+  },
+  {
+    path: "/selfchecout",
+    element: <ProtectedRoute><StoreLayout /></ProtectedRoute>,
+    children: [
+      { index: true, element: <SelfCheckoutPage /> },
+    ]
+  },
+  {
+    path: "/s/:storeId/selfcheckout",
+    element: <StoreLayout />,
+    children: [
+      { index: true, element: <SelfCheckoutPage /> },
+    ]
+  },
+  {
+    path: "/s/:storeId/selfchecout",
+    element: <StoreLayout />,
+    children: [
+      { index: true, element: <SelfCheckoutPage /> },
+    ]
+  },
+  {
+    path: "/s/:storeId/success",
     element: <StoreLayout />,
     children: [
       { index: true, element: <SuccessPage /> },

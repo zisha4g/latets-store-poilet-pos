@@ -1,6 +1,8 @@
 const ECOMMERCE_API_URL = "https://api-ecommerce.hostinger.com";
 const ECOMMERCE_STORE_ID = "store_01K438BRDTB9EC4FG2HEAKG3QZ";
 
+const resolveStoreId = (storeId) => storeId || ECOMMERCE_STORE_ID;
+
 export const formatCurrency = (priceInCents, currencyInfo) => {
 	if (!currencyInfo || priceInCents === null || priceInCents === undefined) {
 		return '';
@@ -343,7 +345,8 @@ const getProductPrice = (product) => {
  *
  * @returns {Promise<GetProductsResponse>} Response object with paginated products
  */
-export async function getProducts({ids, offset, limit, order, sort_by, is_hidden, to_date} = {}) {
+export async function getProducts({ids, offset, limit, order, sort_by, is_hidden, to_date, storeId} = {}) {
+	const resolvedStoreId = resolveStoreId(storeId);
 	const queryParams = new URLSearchParams();
 
 	if (ids) {
@@ -377,7 +380,7 @@ export async function getProducts({ids, offset, limit, order, sort_by, is_hidden
 	}
 
 	const queryString = queryParams.toString();
-	const url = `${ECOMMERCE_API_URL}/store/${ECOMMERCE_STORE_ID}/products${queryString ? `?${queryString}` : ""}`;
+	const url = `${ECOMMERCE_API_URL}/store/${resolvedStoreId}/products${queryString ? `?${queryString}` : ""}`;
 
 	const response = await fetch(url, {
 		method: "GET",
@@ -446,7 +449,8 @@ export async function getProducts({ids, offset, limit, order, sort_by, is_hidden
  *   field: "sku"
  * });
  */
-export async function getProduct(id, {field} = {}) {
+export async function getProduct(id, {field, storeId} = {}) {
+	const resolvedStoreId = resolveStoreId(storeId);
 	const queryParams = new URLSearchParams();
 
 	if (field) {
@@ -454,7 +458,7 @@ export async function getProduct(id, {field} = {}) {
 	}
 
 	const queryString = queryParams.toString();
-	const url = `${ECOMMERCE_API_URL}/store/${ECOMMERCE_STORE_ID}/products/${id}${queryString ? `?${queryString}` : ""}`;
+	const url = `${ECOMMERCE_API_URL}/store/${resolvedStoreId}/products/${id}${queryString ? `?${queryString}` : ""}`;
 
 	const response = await fetch(url, {
 		method: "GET",
@@ -523,7 +527,8 @@ export async function getProduct(id, {field} = {}) {
  *   product_ids: ["product_123", "product_456", "product_789"]
  * });
  */
-export async function getProductQuantities({fields, product_ids}) {
+export async function getProductQuantities({fields, product_ids, storeId}) {
+	const resolvedStoreId = resolveStoreId(storeId);
 	const queryParams = new URLSearchParams();
 
 	queryParams.append("fields", fields);
@@ -532,7 +537,7 @@ export async function getProductQuantities({fields, product_ids}) {
 		queryParams.append("product_ids[]", id);
 	});
 
-	const url = `${ECOMMERCE_API_URL}/store/${ECOMMERCE_STORE_ID}/variants?${queryParams.toString()}`;
+	const url = `${ECOMMERCE_API_URL}/store/${resolvedStoreId}/variants?${queryParams.toString()}`;
 
 	const response = await fetch(url, {
 		method: "GET",
@@ -570,8 +575,9 @@ export async function getProductQuantities({fields, product_ids}) {
  * @example
  * // Use categories to filter products by checking product.collections[].collection_id
  */
-export async function getCategories() {
-	const url = `${ECOMMERCE_API_URL}/store/${ECOMMERCE_STORE_ID}/collections`;
+export async function getCategories({storeId} = {}) {
+	const resolvedStoreId = resolveStoreId(storeId);
+	const url = `${ECOMMERCE_API_URL}/store/${resolvedStoreId}/collections`;
 
 	const response = await fetch(url, {
 		method: "GET",
@@ -601,8 +607,9 @@ export async function getCategories() {
 	};
 }
 
-async function getCheckoutLanguage() {
-	const response = await fetch(`${ECOMMERCE_API_URL}/store/${ECOMMERCE_STORE_ID}/settings`, {
+async function getCheckoutLanguage(storeId) {
+	const resolvedStoreId = resolveStoreId(storeId);
+	const response = await fetch(`${ECOMMERCE_API_URL}/store/${resolvedStoreId}/settings`, {
 		method: "GET",
 		headers: {
 			"Content-Type": "application/json",
@@ -655,8 +662,9 @@ async function getCheckoutLanguage() {
  *   locale: "en",
  * });
  */
-export async function initializeCheckout({items, successUrl, cancelUrl, locale}) {
-	const url = `${ECOMMERCE_API_URL}/store/${ECOMMERCE_STORE_ID}/checkout`;
+export async function initializeCheckout({items, successUrl, cancelUrl, locale, storeId}) {
+	const resolvedStoreId = resolveStoreId(storeId);
+	const url = `${ECOMMERCE_API_URL}/store/${resolvedStoreId}/checkout`;
 	
 	const checkoutInitPromise = fetch(url, {
 		method: "POST",
@@ -672,7 +680,7 @@ export async function initializeCheckout({items, successUrl, cancelUrl, locale})
 		}),
 	});
 
-	const [response, language] = await Promise.all([checkoutInitPromise, getCheckoutLanguage().catch(() => "en")]);
+	const [response, language] = await Promise.all([checkoutInitPromise, getCheckoutLanguage(resolvedStoreId).catch(() => "en")]);
 
 	if (!response.ok) {
 		throw new Error(`HTTP ${response.status}: ${response.statusText}`);

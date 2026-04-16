@@ -20,7 +20,10 @@ import { printDeliveryLabel } from '@/utils/deliveryLabel';
 
 const PosView = ({ products, handlers, settings, savedCarts = [] }) => {
   const [loadedCartId, setLoadedCartId] = useState(null);
-  const [saleState, setSaleState] = useState({ stage: 'customer_lookup', customer: null, cart: [], discount: { type: 'none', value: 0 } });
+  const [saleState, setSaleState] = useState({ 
+    stage: settings?.skipCustomerPrompt?.value ? 'scanning' : 'customer_lookup', 
+    customer: null, cart: [], discount: { type: 'none', value: 0 } 
+  });
   const [isCheckoutOpen, setCheckoutOpen] = useState(false);
   const [isCustomerModalOpen, setCustomerModalOpen] = useState(false);
   const [isAddCustomerModalOpen, setAddCustomerModalOpen] = useState(false);
@@ -45,6 +48,8 @@ const PosView = ({ products, handlers, settings, savedCarts = [] }) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) {
         return;
       }
+      // Don't capture keystrokes when checkout modal is open (card reader needs them)
+      if (isCheckoutOpen) return;
       if (e.ctrlKey || e.altKey || e.metaKey) return;
       if (e.key.length === 1 || e.key === 'Backspace') {
         e.preventDefault();
@@ -60,7 +65,7 @@ const PosView = ({ products, handlers, settings, savedCarts = [] }) => {
       document.addEventListener('keydown', handleGlobalKeyPress);
       return () => document.removeEventListener('keydown', handleGlobalKeyPress);
     }
-  }, [saleState.stage]);
+  }, [saleState.stage, isCheckoutOpen]);
 
   // Get default tax from settings
   const defaultTax = useMemo(() => {
@@ -400,7 +405,10 @@ const PosView = ({ products, handlers, settings, savedCarts = [] }) => {
   }, []);
 
   const resetSale = () => {
-    setSaleState({ stage: 'customer_lookup', customer: null, cart: [], discount: { type: 'none', value: 0 } });
+    setSaleState({ 
+      stage: settings?.skipCustomerPrompt?.value ? 'scanning' : 'customer_lookup', 
+      customer: null, cart: [], discount: { type: 'none', value: 0 } 
+    });
     setLastSale(null);
   };
 
@@ -700,6 +708,21 @@ const PosView = ({ products, handlers, settings, savedCarts = [] }) => {
           setSearchValue={setSearchValue}
           onAddToCart={handleAddToCart}
           onAddNewProduct={handleAddNewProduct}
+          findCustomerByPhone={handlers?.customers?.findByPhone}
+          onCustomerFound={(customer) => {
+            setSaleState(prev => ({ ...prev, customer }));
+            toast({ title: `Customer attached`, description: customer.name || customer.phone });
+          }}
+          onAddNewCustomer={(phone) => {
+            setProductNameToAdd('');
+            setSaleState(prev => ({ ...prev, stage: 'scanning' }));
+            handlers?.customers?.create?.({ phone, name: '' }).then((newCust) => {
+              if (newCust) {
+                setSaleState(prev => ({ ...prev, customer: newCust }));
+                toast({ title: 'Customer created', description: phone });
+              }
+            });
+          }}
         />
 
         <div className="mt-3 sm:mt-4 space-y-1.5 sm:space-y-2 text-xs sm:text-sm">
@@ -765,7 +788,7 @@ const PosView = ({ products, handlers, settings, savedCarts = [] }) => {
               Phone Order
             </Button>
             <Button
-              onClick={() => setCheckoutOpen(true)}
+              onClick={() => { setSearchValue(''); setCheckoutOpen(true); }}
               disabled={saleState.cart.length === 0}
               className="pos-button font-semibold py-2 sm:py-3 px-4 sm:px-8 rounded-xl text-xs sm:text-sm flex-1 sm:flex-none"
             >
@@ -869,6 +892,7 @@ const PosView = ({ products, handlers, settings, savedCarts = [] }) => {
         onSubmit={({ address, instructions, saveToProfile }) => {
           setPhoneOrderDraft({ address, instructions, saveToProfile });
           // Open checkout after capturing delivery details
+          setSearchValue('');
           setCheckoutOpen(true);
           setPhoneOrderModalOpen(false);
         }}

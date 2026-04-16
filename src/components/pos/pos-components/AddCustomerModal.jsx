@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { UserPlus } from 'lucide-react';
 
-const AddCustomerModal = ({ isOpen, onClose, onSave }) => {
+const AddCustomerModal = ({ isOpen, onClose, onSave, initialPhone = '' }) => {
   const [customerData, setCustomerData] = useState({
     name: '',
     phone: '',
@@ -31,6 +31,12 @@ const AddCustomerModal = ({ isOpen, onClose, onSave }) => {
     setCustomerData({ name: '', phone: '', email: '', address: '' });
     onClose();
   };
+
+  useEffect(() => {
+    if (isOpen) {
+      setCustomerData(prev => ({ ...prev, phone: initialPhone || '' }));
+    }
+  }, [isOpen, initialPhone]);
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>

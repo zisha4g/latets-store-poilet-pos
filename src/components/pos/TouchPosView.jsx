@@ -19,6 +19,8 @@ import AssignCustomerModal from './pos-components/AssignCustomerModal';
 import PhoneOrderModal from './pos-components/PhoneOrderModal';
 import { printDeliveryLabel } from '@/utils/deliveryLabel';
 
+const isPhoneNumber = (val) => /^\d{7}$|^\d{10}$/.test((val || '').trim());
+
 // ─── Touch-friendly Keyboard ────────────────────────────────────────────
 // Self-contained keyboard built into the touch POS. Large keys for fingers.
 
@@ -191,10 +193,16 @@ function TouchCartItem({ item, onUpdateQuantity, onToggleTaxable }) {
 const TouchPosView = ({ products, handlers, settings, savedCarts = [] }) => {
   // ─── State ──────────────────────────────────────────────────
   const [loadedCartId, setLoadedCartId] = useState(null);
-  const [saleState, setSaleState] = useState({ stage: 'customer_lookup', customer: null, cart: [], discount: { type: 'none', value: 0 } });
+  const [saleState, setSaleState] = useState({
+    stage: settings?.skipCustomerPrompt?.value ? 'scanning' : 'customer_lookup',
+    customer: null,
+    cart: [],
+    discount: { type: 'none', value: 0 }
+  });
   const [isCheckoutOpen, setCheckoutOpen] = useState(false);
   const [isCustomerModalOpen, setCustomerModalOpen] = useState(false);
   const [isAddCustomerModalOpen, setAddCustomerModalOpen] = useState(false);
+  const [addCustomerPhonePrefill, setAddCustomerPhonePrefill] = useState('');
   const [isAssignCustomerModalOpen, setAssignCustomerModalOpen] = useState(false);
   const [isSaveCartModalOpen, setSaveCartModalOpen] = useState(false);
   const [isDiscountModalOpen, setDiscountModalOpen] = useState(false);
@@ -365,7 +373,15 @@ const TouchPosView = ({ products, handlers, settings, savedCarts = [] }) => {
   const handleApplyDiscount = (type, value) => { setSaleState(prev => ({ ...prev, discount: { type, value } })); setDiscountModalOpen(false); };
   const handleRemoveDiscount = () => { setSaleState(prev => ({ ...prev, discount: { type: 'none', value: 0 } })); };
 
-  const resetSale = () => { setSaleState({ stage: 'customer_lookup', customer: null, cart: [], discount: { type: 'none', value: 0 } }); setLastSale(null); };
+  const resetSale = () => {
+    setSaleState({
+      stage: settings?.skipCustomerPrompt?.value ? 'scanning' : 'customer_lookup',
+      customer: null,
+      cart: [],
+      discount: { type: 'none', value: 0 }
+    });
+    setLastSale(null);
+  };
 
   // ─── Keyboard input helpers ────────────────────────────────
   const activeInputRef = useRef(null);
@@ -417,6 +433,35 @@ const TouchPosView = ({ products, handlers, settings, savedCarts = [] }) => {
     ).slice(0, 12);
   }, [searchValue, products]);
 
+  const [searchCustomerMatch, setSearchCustomerMatch] = useState(null);
+  const [searchCustomerLoading, setSearchCustomerLoading] = useState(false);
+
+  useEffect(() => {
+    const phone = (searchValue || '').trim();
+    if (!handlers?.customers?.findByPhone || !isPhoneNumber(phone)) {
+      setSearchCustomerMatch(null);
+      setSearchCustomerLoading(false);
+      return;
+    }
+
+    setSearchCustomerLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const result = await handlers.customers.findByPhone(phone);
+        setSearchCustomerMatch(result || null);
+      } catch {
+        setSearchCustomerMatch(null);
+      } finally {
+        setSearchCustomerLoading(false);
+      }
+    }, 250);
+
+    return () => {
+      clearTimeout(timer);
+      setSearchCustomerLoading(false);
+    };
+  }, [searchValue, handlers?.customers]);
+
   const handleProductSelect = (product) => {
     handleAddToCart(product);
     setSearchValue('');
@@ -425,12 +470,29 @@ const TouchPosView = ({ products, handlers, settings, savedCarts = [] }) => {
   };
 
   const handleSearchEnter = () => {
+    const typed = searchValue.trim();
     if (filteredProducts.length === 1) {
       handleProductSelect(filteredProducts[0]);
     } else if (filteredProducts.length > 0) {
       handleProductSelect(filteredProducts[0]);
-    } else if (searchValue.trim()) {
-      handleAddNewProduct(searchValue.trim());
+    } else if (isPhoneNumber(typed)) {
+      if (searchCustomerMatch?.multiple && searchCustomerMatch.matches?.length > 0) {
+        const customer = searchCustomerMatch.matches[0];
+        setSaleState(prev => ({ ...prev, customer }));
+        toast({ title: `Customer attached`, description: customer.name || customer.phone });
+        setSearchValue('');
+        setShowKeyboard(false);
+      } else if (searchCustomerMatch && !searchCustomerMatch.multiple) {
+        setSaleState(prev => ({ ...prev, customer: searchCustomerMatch }));
+        toast({ title: `Customer attached`, description: searchCustomerMatch.name || searchCustomerMatch.phone });
+        setSearchValue('');
+        setShowKeyboard(false);
+      } else {
+        setAddCustomerPhonePrefill(typed);
+        setAddCustomerModalOpen(true);
+      }
+    } else if (typed) {
+      handleAddNewProduct(typed);
       setSearchValue('');
     }
   };
@@ -653,6 +715,50 @@ const TouchPosView = ({ products, handlers, settings, savedCarts = [] }) => {
                 {filteredProducts.length === 0 ? (
                   <div className="text-center py-8">
                     <p className="text-muted-foreground mb-3">No product found for "{searchValue}"</p>
+                    {searchCustomerLoading && isPhoneNumber(searchValue) && (
+                      <p className="text-xs text-muted-foreground mb-3">Searching customers...</p>
+                    )}
+                    {isPhoneNumber(searchValue) && searchCustomerMatch && !searchCustomerMatch.multiple && (
+                      <Button
+                        variant="secondary"
+                        onClick={() => {
+                          setSaleState(prev => ({ ...prev, customer: searchCustomerMatch }));
+                          toast({ title: 'Customer attached', description: searchCustomerMatch.name || searchCustomerMatch.phone });
+                          setSearchValue('');
+                          setShowKeyboard(false);
+                        }}
+                        className="h-11 px-5 rounded-xl text-sm mr-2 mb-2"
+                      >
+                        <User className="w-4 h-4 mr-2" /> Attach {searchCustomerMatch.name || searchCustomerMatch.phone}
+                      </Button>
+                    )}
+                    {isPhoneNumber(searchValue) && searchCustomerMatch?.multiple && searchCustomerMatch.matches?.slice(0, 3).map((c) => (
+                      <Button
+                        key={c.id}
+                        variant="secondary"
+                        onClick={() => {
+                          setSaleState(prev => ({ ...prev, customer: c }));
+                          toast({ title: 'Customer attached', description: c.name || c.phone });
+                          setSearchValue('');
+                          setShowKeyboard(false);
+                        }}
+                        className="h-11 px-5 rounded-xl text-sm mr-2 mb-2"
+                      >
+                        <User className="w-4 h-4 mr-2" /> Attach {c.name || c.phone}
+                      </Button>
+                    ))}
+                    {isPhoneNumber(searchValue) && !searchCustomerLoading && !searchCustomerMatch && (
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setAddCustomerPhonePrefill(searchValue.trim());
+                          setAddCustomerModalOpen(true);
+                        }}
+                        className="h-11 px-5 rounded-xl text-sm mr-2 mb-2"
+                      >
+                        <UserPlus className="w-4 h-4 mr-2" /> Add "{searchValue}" as customer
+                      </Button>
+                    )}
                     <Button onClick={() => { handleAddNewProduct(searchValue); setSearchValue(''); setShowKeyboard(false); }} className="h-12 px-6 rounded-xl text-base">
                       <Plus className="w-4 h-4 mr-2" /> Add "{searchValue}"
                     </Button>
@@ -753,8 +859,8 @@ const TouchPosView = ({ products, handlers, settings, savedCarts = [] }) => {
       {/* Modals */}
       <CheckoutModal isOpen={isCheckoutOpen} onOpenChange={setCheckoutOpen} onSave={handleProcessSale} total={total} subtotal={subtotal} cart={saleState.cart} taxes={appliedTaxes} serviceCharges={appliedServiceCharges} customer={saleState.customer} />
       <CustomerDetailModal isOpen={isCustomerModalOpen} onClose={() => setCustomerModalOpen(false)} customer={saleState.customer} onSave={async (c) => { await handlers.customers.update(c); setSaleState(prev => ({ ...prev, customer: c })); }} />
-      <AssignCustomerModal isOpen={isAssignCustomerModalOpen} onClose={() => setAssignCustomerModalOpen(false)} onAssignCustomer={handleAssignCustomerToSale} onAddNewCustomer={() => { setAssignCustomerModalOpen(false); setAddCustomerModalOpen(true); }} handlers={handlers} />
-      <AddCustomerModal isOpen={isAddCustomerModalOpen} onClose={() => setAddCustomerModalOpen(false)} onSave={handleAddCustomerToSale} />
+      <AssignCustomerModal isOpen={isAssignCustomerModalOpen} onClose={() => setAssignCustomerModalOpen(false)} onAssignCustomer={handleAssignCustomerToSale} onAddNewCustomer={() => { setAssignCustomerModalOpen(false); setAddCustomerPhonePrefill(''); setAddCustomerModalOpen(true); }} handlers={handlers} />
+      <AddCustomerModal isOpen={isAddCustomerModalOpen} onClose={() => setAddCustomerModalOpen(false)} onSave={handleAddCustomerToSale} initialPhone={addCustomerPhonePrefill} />
       <SaveCartModal isOpen={isSaveCartModalOpen} onClose={() => setSaveCartModalOpen(false)} onSave={handleSaveCart} customer={saleState.customer} cartTotal={total} itemCount={saleState.cart.length} />
       <DiscountModal isOpen={isDiscountModalOpen} onClose={() => setDiscountModalOpen(false)} onApplyDiscount={handleApplyDiscount} onAddCustomItem={handleAddToCart} subtotal={subtotal} />
       <PhoneOrderModal isOpen={isPhoneOrderModalOpen} onClose={() => setPhoneOrderModalOpen(false)} customer={saleState.customer} onSubmit={({ address, instructions, saveToProfile }) => { setPhoneOrderDraft({ address, instructions, saveToProfile }); setCheckoutOpen(true); setPhoneOrderModalOpen(false); }} />

@@ -54,11 +54,14 @@ Deno.serve(async (req) => {
     });
   }
 
-  const { amount, exp, cardSut, cvvSut, invoice, customer, customerId } = payload as {
+  const { amount, exp, cardSut, cvvSut, magstripe, cardNum, cardExp, invoice, customer, customerId } = payload as {
     amount?: number | string;
     exp?: string;
     cardSut?: string;
     cvvSut?: string;
+    magstripe?: string;
+    cardNum?: string;
+    cardExp?: string;
     invoice?: string;
     customer?: {
       name?: string;
@@ -69,7 +72,8 @@ Deno.serve(async (req) => {
     customerId?: string;
   };
 
-  if (!amount || !exp || !cardSut || !cvvSut) {
+  // magstripe (card reader swipe) OR parsed card number+exp OR manual iFields entry (cardSut+cvvSut+exp)
+  if (!amount || (!magstripe && !cardNum && (!exp || !cardSut || !cvvSut))) {
     return new Response(JSON.stringify({ error: "Missing required payment fields" }), {
       status: 400,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -107,10 +111,27 @@ Deno.serve(async (req) => {
     xSoftwareVersion: "1.0.0",
     xCommand: "cc:sale",
     xAmount: amountValue,
-    xCardNum: cardSut,
-    xCVV: cvvSut,
-    xExp: exp,
   };
+
+  if (magstripe) {
+    // Card reader swipe — send raw track data
+    transactionPayload.xMagstripe = magstripe;
+  }
+  if (cardNum) {
+    // Parsed card number from reader (fallback / card-present keyed)
+    transactionPayload.xCardNum = cardNum;
+    if (cardExp) {
+      // Track data gives YYMM, Cardknox expects MMYY
+      const flipped = cardExp.length === 4 ? cardExp.slice(2) + cardExp.slice(0, 2) : cardExp;
+      transactionPayload.xExp = flipped;
+    }
+  }
+  if (!magstripe && !cardNum) {
+    // Manual / iFields token entry
+    transactionPayload.xCardNum = cardSut!;
+    transactionPayload.xCVV = cvvSut!;
+    transactionPayload.xExp = exp!;
+  }
 
   if (invoice) transactionPayload.xInvoice = invoice;
   if (customer?.name) transactionPayload.xName = customer.name;
