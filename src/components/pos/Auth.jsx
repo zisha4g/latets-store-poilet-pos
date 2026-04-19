@@ -62,7 +62,7 @@ const Auth = ({ mode = 'login' }) => {
 
   return (
     <div className="w-full h-screen flex flex-col items-center justify-center bg-gray-100 dark:bg-gray-900 px-4">
-      {!location.state?.kioskMode && (
+      {!location.state?.kioskMode && !isElectron && (
         <div className="absolute top-6 left-6">
           <Button asChild variant="outline">
             <Link to="/">← Back to Home</Link>

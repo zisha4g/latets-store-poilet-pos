@@ -21,6 +21,27 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     const getSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
+
+      if (!session && window.electronAPI?.getKioskCredentials) {
+        // Electron kiosk: try to auto-login with saved credentials
+        const creds = await window.electronAPI.getKioskCredentials();
+        if (creds) {
+          // Attempt silent sign-in; keep loading=true so ProtectedRoute shows spinner
+          // onAuthStateChange will fire and call handleSession when it succeeds
+          const { error } = await supabase.auth.signInWithPassword({
+            email: creds.email,
+            password: creds.password,
+          });
+          if (error) {
+            // Credentials failed (e.g. password changed) — fall through to unauthenticated state
+            handleSession(null);
+          }
+          // On success, onAuthStateChange handles setting session/loading
+          return;
+        }
+        // No saved credentials — fall through; ProtectedRoute redirects to /kiosk-setup
+      }
+
       handleSession(session);
     };
 

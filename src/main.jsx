@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom';
+import { createBrowserRouter, RouterProvider, Navigate, useRouteError } from 'react-router-dom';
 import { HelmetProvider } from 'react-helmet-async';
 
 import AppLayout from '@/pages/AppLayout.jsx';
@@ -27,6 +27,7 @@ import ProductsListPage from '@/pages/ProductsListPage.jsx';
 import ProductDetailPage from '@/pages/ProductDetailPage.jsx';
 import SelfCheckoutPage from '@/pages/SelfCheckoutPage.jsx';
 import SuccessPage from '@/pages/SuccessPage.jsx';
+import KioskSetupPage from '@/pages/KioskSetupPage.jsx';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute.jsx';
 
 
@@ -35,9 +36,25 @@ import { Toaster } from "@/components/ui/toaster.jsx";
 import { AuthProvider } from '@/contexts/SupabaseAuthContext.jsx';
 import { CartProvider } from '@/hooks/useCart.jsx';
 
+function RootErrorBoundary() {
+  const error = useRouteError();
+  console.error('[Router Error]', error);
+  return (
+    <div style={{ padding: 24, fontFamily: 'monospace' }}>
+      <h2>Router Error</h2>
+      <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+        {String(error?.message || error?.statusText || error)}
+        {'\n\nURL: ' + window.location.href}
+        {'\nPathname: ' + window.location.pathname}
+      </pre>
+    </div>
+  );
+}
+
 const router = createBrowserRouter([
   {
     path: "/",
+    errorElement: <RootErrorBoundary />,
     element: <LandingPage />,
   },
   {
@@ -100,6 +117,10 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <SuccessPage /> },
     ]
+  },
+  {
+    path: "/kiosk-setup",
+    element: <KioskSetupPage />,
   },
   {
     path: "/selfcheckout",

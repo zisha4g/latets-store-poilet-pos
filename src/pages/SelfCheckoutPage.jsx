@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ShoppingCart, Tag, X, CheckCircle2, Lock, LogOut, ShieldCheck } from 'lucide-react';
 import { useOutletContext, useNavigate } from 'react-router-dom';
 
+import { Button } from '@/components/ui/button';
 import CardReaderSwipe from '@/components/pos/pos-components/CardReaderSwipe.jsx';
 import { useCart } from '@/hooks/useCart.jsx';
 import { useAuth } from '@/contexts/SupabaseAuthContext.jsx';
@@ -270,6 +271,14 @@ const PriceCheckScreen = ({ catalog, onDone }) => {
       {countdown !== null && (
         <p className="text-muted-foreground text-lg">Returning in {countdown}…</p>
       )}
+      <Button
+        variant="outline"
+        size="lg"
+        className="mt-4 text-lg px-8 py-6 rounded-2xl"
+        onClick={() => { if (timerRef.current) clearInterval(timerRef.current); onDone(); }}
+      >
+        ← Back
+      </Button>
     </div>
   );
 };

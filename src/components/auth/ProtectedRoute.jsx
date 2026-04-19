@@ -20,7 +20,12 @@ export const ProtectedRoute = ({ children, redirectTo = '/login' }) => {
   }
 
   if (!user) {
-    return <Navigate to={redirectTo} replace state={{ from: location.pathname }} />;
+    const isSelfCheckout = location.pathname.includes('selfcheckout') || location.pathname.includes('selfchecout');
+    // In Electron kiosk, redirect to setup page instead of login
+    if (window.electronAPI?.isElectron) {
+      return <Navigate to="/kiosk-setup" replace />;
+    }
+    return <Navigate to={redirectTo} replace state={{ from: location.pathname, kioskMode: isSelfCheckout }} />;
   }
 
   return children;
