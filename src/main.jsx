@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { createBrowserRouter, RouterProvider, Navigate, useRouteError } from 'react-router-dom';
+import { createBrowserRouter, createHashRouter, RouterProvider, Navigate } from 'react-router-dom';
 import { HelmetProvider } from 'react-helmet-async';
 
 import AppLayout from '@/pages/AppLayout.jsx';
@@ -23,6 +23,7 @@ import PbxPage from '@/pages/app/PbxPage.jsx';
 import CalendarPage from '@/pages/app/CalendarPage.jsx';
 import StripeCallbackPage from '@/pages/StripeCallbackPage.jsx';
 import StoreLayout from '@/pages/StoreLayout.jsx';
+import PbxStandalonePage from '@/pages/PbxStandalonePage.jsx';
 import ProductsListPage from '@/pages/ProductsListPage.jsx';
 import ProductDetailPage from '@/pages/ProductDetailPage.jsx';
 import SelfCheckoutPage from '@/pages/SelfCheckoutPage.jsx';
@@ -36,25 +37,41 @@ import { Toaster } from "@/components/ui/toaster.jsx";
 import { AuthProvider } from '@/contexts/SupabaseAuthContext.jsx';
 import { CartProvider } from '@/hooks/useCart.jsx';
 
-function RootErrorBoundary() {
-  const error = useRouteError();
-  console.error('[Router Error]', error);
-  return (
-    <div style={{ padding: 24, fontFamily: 'monospace' }}>
-      <h2>Router Error</h2>
-      <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-        {String(error?.message || error?.statusText || error)}
-        {'\n\nURL: ' + window.location.href}
-        {'\nPathname: ' + window.location.pathname}
-      </pre>
-    </div>
-  );
-}
+const isElectron = !!(window.electronAPI);
+const createRouter = isElectron ? createHashRouter : createBrowserRouter;
 
-const router = createBrowserRouter([
+const electronRoutes = [
   {
     path: "/",
-    errorElement: <RootErrorBoundary />,
+    element: <Navigate to="/selfcheckout" replace />,
+  },
+  {
+    path: "/kiosk-setup",
+    element: <KioskSetupPage />,
+  },
+  {
+    path: "/selfcheckout",
+    element: <ProtectedRoute><StoreLayout /></ProtectedRoute>,
+    children: [
+      { index: true, element: <SelfCheckoutPage /> },
+    ]
+  },
+  {
+    path: "/selfchecout",
+    element: <Navigate to="/selfcheckout" replace />,
+  },
+  {
+    path: "/success",
+    element: <StoreLayout />,
+    children: [
+      { index: true, element: <SuccessPage /> },
+    ]
+  },
+];
+
+const webRoutes = [
+  {
+    path: "/",
     element: <LandingPage />,
   },
   {
@@ -96,6 +113,10 @@ const router = createBrowserRouter([
       { path: "pbx", element: <PbxPage /> },
       { path: "accounting/*", element: <AccountingApp /> }
     ]
+  },
+  {
+    path: "/pbx",
+    element: <PbxStandalonePage />,
   },
   {
     path: "/store",
@@ -156,15 +177,17 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <SuccessPage /> },
     ]
-  }
-]);
+  },
+];
+
+const router = createRouter(isElectron ? electronRoutes : webRoutes);
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <HelmetProvider>
       <AuthProvider>
         <CartProvider>
-          <RouterProvider router={router} />
+          <RouterProvider router={router} future={{ v7_startTransition: true }} />
           <Toaster />
         </CartProvider>
       </AuthProvider>

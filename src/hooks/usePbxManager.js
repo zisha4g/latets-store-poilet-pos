@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 
 export function usePbxManager(user) {
@@ -35,6 +35,42 @@ export function usePbxManager(user) {
     if (errors.length > 0) {
       throw new Error(errors.map(e => e.message).join(', '));
     }
+  }, [user]);
+
+  // Realtime: keep callLogs fresh as voice-events writes/updates rows.
+  useEffect(() => {
+    if (!user) return;
+    const channel = supabase
+      .channel(`pbx_call_logs_${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'pbx_call_logs', filter: `user_id=eq.${user.id}` },
+        (payload) => {
+          setPbxData((d) => {
+            const list = d.callLogs || [];
+            if (payload.eventType === 'INSERT') {
+              if (list.some((l) => l.id === payload.new.id)) return d;
+              return { ...d, callLogs: [payload.new, ...list] };
+            }
+            if (payload.eventType === 'UPDATE') {
+              return {
+                ...d,
+                callLogs: list.map((l) =>
+                  l.id === payload.new.id ? { ...l, ...payload.new } : l
+                ),
+              };
+            }
+            if (payload.eventType === 'DELETE') {
+              return { ...d, callLogs: list.filter((l) => l.id !== payload.old.id) };
+            }
+            return d;
+          });
+        }
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user]);
 
   const handlers = {

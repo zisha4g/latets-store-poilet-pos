@@ -11,6 +11,7 @@ import SettingsShortcuts from '@/components/pos/settings/SettingsShortcuts';
 import PBXSettings from '@/components/pos/settings/PBXSettings';
 import PaymentGatewaySettings from '@/components/pos/settings/PaymentGatewaySettings';
 import SettingsCalendar from '@/components/pos/settings/SettingsCalendar';
+import VoiceOrderingSettings from '@/components/pos/settings/VoiceOrderingSettings';
 
 const SettingsPage = () => {
     const { data, handlers } = useOutletContext();
@@ -27,6 +28,8 @@ const SettingsPage = () => {
                 return <SettingsAppearance settings={settings} onUpdate={handlers.settings.update} />;
             case 'payment-gateway':
                 return <PaymentGatewaySettings />;
+            case 'voice-ordering':
+                return <VoiceOrderingSettings />;
             case 'financials':
                 return <SettingsFinancials taxes={taxes} serviceCharges={serviceCharges} handlers={handlers} />;
             case 'modules':

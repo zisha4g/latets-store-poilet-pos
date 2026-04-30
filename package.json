@@ -31,9 +31,10 @@
       "icon": "electron/icon.ico"
     },
     "nsis": {
-      "oneClick": true,
+      "oneClick": false,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": false
+      "allowToChangeInstallationDirectory": false,
+      "include": "installer.nsh"
     },
     "publish": {
       "provider": "github",
@@ -42,6 +43,7 @@
     }
   },
   "dependencies": {
+    "@dagrejs/dagre": "^3.0.0",
     "@emotion/is-prop-valid": "^1.2.1",
     "@hebcal/core": "^6.0.8",
     "@radix-ui/react-alert-dialog": "^1.0.5",
@@ -62,6 +64,7 @@
     "@stripe/stripe-js": "^3.5.0",
     "@supabase/supabase-js": "2.30.0",
     "@twilio/voice-sdk": "^2.10.2",
+    "@xyflow/react": "^12.10.2",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.0.0",
     "cmdk": "^1.0.0",

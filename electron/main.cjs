@@ -20,13 +20,24 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 const DEV_SERVER_URL = process.env.ELECTRON_RENDERER_URL || 'http://127.0.0.1:3000';
-const KIOSK_ENTRY_PATH = '/selfcheckout';
 const DIST_DIR = path.join(__dirname, '..', 'dist');
 
 // ---------- Kiosk credential storage (AES-256-GCM, key derived from machine identity) ----------
 
 function getConfigPath() {
   return path.join(app.getPath('appData'), 'StorePilot', 'kiosk-config.json');
+}
+
+function getInstallerConfigDir() {
+  return path.join(app.getPath('appData'), 'StorePilot');
+}
+
+function getPendingInstallerEmailPath() {
+  return path.join(getInstallerConfigDir(), 'installer-email.txt');
+}
+
+function getPendingInstallerPasswordPath() {
+  return path.join(getInstallerConfigDir(), 'installer-password.txt');
 }
 
 function getDerivedKey() {
@@ -67,6 +78,37 @@ function saveKioskConfig(email, password) {
   if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
   const { encrypted, iv, tag } = encryptValue(password);
   fs.writeFileSync(getConfigPath(), JSON.stringify({ email, encrypted, iv, tag }), 'utf8');
+}
+
+function clearKioskConfig() {
+  const configFile = getConfigPath();
+  if (fs.existsSync(configFile)) {
+    fs.unlinkSync(configFile);
+  }
+}
+
+function readPendingInstallerCredentials() {
+  try {
+    const emailPath = getPendingInstallerEmailPath();
+    const passwordPath = getPendingInstallerPasswordPath();
+    if (!fs.existsSync(emailPath) || !fs.existsSync(passwordPath)) return null;
+
+    const email = fs.readFileSync(emailPath, 'utf8').trim();
+    const password = fs.readFileSync(passwordPath, 'utf8').replace(/\r?\n$/, '');
+
+    if (!email || !password) return null;
+    return { email, password };
+  } catch {
+    return null;
+  }
+}
+
+function clearPendingInstallerCredentials() {
+  const emailPath = getPendingInstallerEmailPath();
+  const passwordPath = getPendingInstallerPasswordPath();
+
+  if (fs.existsSync(emailPath)) fs.unlinkSync(emailPath);
+  if (fs.existsSync(passwordPath)) fs.unlinkSync(passwordPath);
 }
 
 
@@ -122,10 +164,9 @@ function registerAppProtocol() {
 
 function resolveAppUrl() {
   if (!app.isPackaged) {
-    return `${DEV_SERVER_URL}${KIOSK_ENTRY_PATH}`;
+    return `${DEV_SERVER_URL}/#/selfcheckout`;
   }
-  // app:// scheme — stable origin so localStorage persists across restarts
-  return `app://storepilot${KIOSK_ENTRY_PATH}`;
+  return 'app://storepilot/#/selfcheckout';
 }
 
 // ---------- Create the main window ----------
@@ -177,9 +218,9 @@ async function createWindow() {
   if (app.isPackaged) {
     mainWindow.webContents.on('before-input-event', (event, input) => {
       const isReload = input.key === 'F5' || ((input.control || input.meta) && input.key.toLowerCase() === 'r');
-      if (isReload) event.preventDefault();
+      const isDevTools = input.key === 'F12' || ((input.control || input.meta) && input.shift && input.key.toLowerCase() === 'i');
+      if (isReload || isDevTools) event.preventDefault();
     });
-    mainWindow.webContents.openDevTools({ mode: 'detach' });
   }
 
   mainWindow.on('closed', () => {
@@ -190,11 +231,15 @@ async function createWindow() {
 ipcMain.handle('app:get-runtime-info', () => ({
   isPackaged: app.isPackaged,
   platform: process.platform,
-  kioskEntryPath: KIOSK_ENTRY_PATH,
+  kioskEntryPath: resolveAppUrl(),
 }));
 
 ipcMain.handle('app:get-kiosk-credentials', () => {
   return readKioskConfig();
+});
+
+ipcMain.handle('app:get-installer-credentials', () => {
+  return readPendingInstallerCredentials();
 });
 
 ipcMain.handle('app:save-kiosk-credentials', (_event, { email, password }) => {
@@ -202,6 +247,24 @@ ipcMain.handle('app:save-kiosk-credentials', (_event, { email, password }) => {
     saveKioskConfig(email, password);
     // Register app to auto-start on Windows login
     app.setLoginItemSettings({ openAtLogin: true, name: 'StorePilot' });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('app:clear-kiosk-credentials', () => {
+  try {
+    clearKioskConfig();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('app:clear-installer-credentials', () => {
+  try {
+    clearPendingInstallerCredentials();
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };

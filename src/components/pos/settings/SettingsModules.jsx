@@ -4,7 +4,7 @@ import { Switch } from '@/components/ui/switch';
 import { toast } from '@/components/ui/use-toast';
 import {
   LayoutDashboard, ShoppingCart, FileText, Package, Users, Calendar,
-  Truck, BarChart2, Banknote, Keyboard, Download
+  Truck, BarChart2, Banknote, Keyboard, Download, Phone
 } from 'lucide-react';
 import {
   Select,
@@ -25,6 +25,7 @@ const SIDEBAR_MODULES = [
   { key: 'enablePurchasing', icon: Truck,           label: 'Purchasing' },
   { key: 'enableReports',    icon: BarChart2,       label: 'Reports' },
   { key: 'enableAccounting', icon: Banknote,        label: 'Accounting' },
+  { key: 'enablePBX',        icon: Phone,           label: 'PBX Phone System' },
 ];
 
 const SettingsModules = ({ settings, onUpdate }) => {

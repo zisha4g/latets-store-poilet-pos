@@ -1,28 +1,34 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { PhoneIncoming, PhoneCall, PhoneMissed, Clock } from 'lucide-react';
+import {
+  PhoneIncoming,
+  PhoneOutgoing,
+  PhoneCall,
+  PhoneMissed,
+  Clock,
+} from 'lucide-react';
+import {
+  callCounterparty,
+  callTalkSeconds,
+  formatDurationShort,
+  statusLabel,
+  statusTone,
+} from './callFormat';
+import CallLogDetailsDialog from './CallLogDetailsDialog';
 
 const PbxDashboard = ({ pbxData, onSimulateCall }) => {
   const { callLogs } = pbxData;
+  const [selectedLog, setSelectedLog] = useState(null);
 
   const totalCalls = callLogs.length;
   const inboundCalls = callLogs.filter(c => c.direction === 'inbound').length;
   const outboundCalls = callLogs.filter(c => c.direction === 'outbound').length;
-  const missedCalls = callLogs.filter(c => c.status === 'missed' || c.status === 'declined').length;
-  const totalDuration = callLogs.reduce((acc, c) => acc + (c.duration_seconds || 0), 0);
-  const avgDuration = totalCalls > 0 ? (totalDuration / totalCalls) : 0;
-
-  const formatDuration = (seconds) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-    return [
-      h > 0 ? `${h}h` : '',
-      m > 0 ? `${m}m` : '',
-      s > 0 ? `${s}s` : ''
-    ].filter(Boolean).join(' ') || '0s';
-  };
+  const missedCalls = callLogs.filter(c =>
+    ['missed', 'declined', 'no-answer', 'busy', 'failed', 'canceled'].includes(c.status)
+  ).length;
+  const totalDuration = callLogs.reduce((acc, c) => acc + callTalkSeconds(c), 0);
+  const avgDuration = totalCalls > 0 ? Math.round(totalDuration / totalCalls) : 0;
 
   return (
     <div className="space-y-6">
@@ -64,11 +70,11 @@ const PbxDashboard = ({ pbxData, onSimulateCall }) => {
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Avg. Call Duration</CardTitle>
+            <CardTitle className="text-sm font-medium">Avg. Talk Time</CardTitle>
             <Clock className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{formatDuration(avgDuration)}</div>
+            <div className="text-2xl font-bold">{formatDurationShort(avgDuration)}</div>
           </CardContent>
         </Card>
       </div>
@@ -76,27 +82,53 @@ const PbxDashboard = ({ pbxData, onSimulateCall }) => {
       <Card>
         <CardHeader>
           <CardTitle>Recent Calls</CardTitle>
-          <CardDescription>Your last 5 calls.</CardDescription>
+          <CardDescription>Your last 5 calls. Click a row for details.</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            {callLogs.slice(0, 5).map(log => (
-              <div key={log.id} className="flex items-center">
-                <div className="ml-4 space-y-1">
-                  <p className="text-sm font-medium leading-none">
-                    {log.customers?.name || log.phone_number}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    {log.direction} - {log.status} - {formatDuration(log.duration_seconds)}
-                  </p>
-                </div>
-                <div className="ml-auto font-medium">{new Date(log.created_at).toLocaleTimeString()}</div>
-              </div>
-            ))}
-            {callLogs.length === 0 && <p className="text-center text-muted-foreground">No calls logged yet.</p>}
+          <div className="divide-y">
+            {callLogs.slice(0, 5).map((log) => {
+              const isOut = log.direction === 'outbound';
+              const isFailed = ['missed', 'no-answer', 'failed', 'busy', 'canceled', 'declined'].includes(log.status);
+              const Icon = isFailed ? PhoneMissed : isOut ? PhoneOutgoing : PhoneIncoming;
+              const when = log.started_at || log.created_at;
+              const talk = callTalkSeconds(log);
+              return (
+                <button
+                  key={log.id}
+                  type="button"
+                  onClick={() => setSelectedLog(log)}
+                  className="w-full flex items-center gap-3 py-3 px-2 text-left rounded-md hover:bg-muted/50 transition-colors"
+                >
+                  <Icon className={`h-5 w-5 shrink-0 ${statusTone(log.status)}`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">
+                      {callCounterparty(log) || 'Unknown'}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      <span className="capitalize">{log.direction}</span>
+                      {' · '}
+                      <span className={statusTone(log.status)}>{statusLabel(log.status)}</span>
+                      {talk > 0 && <> {' · '} {formatDurationShort(talk)}</>}
+                    </p>
+                  </div>
+                  <div className="text-xs text-muted-foreground shrink-0">
+                    {when ? new Date(when).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                  </div>
+                </button>
+              );
+            })}
+            {callLogs.length === 0 && (
+              <p className="text-center text-muted-foreground py-6">No calls logged yet.</p>
+            )}
           </div>
         </CardContent>
       </Card>
+
+      <CallLogDetailsDialog
+        log={selectedLog}
+        open={!!selectedLog}
+        onOpenChange={(open) => !open && setSelectedLog(null)}
+      />
     </div>
   );
 };

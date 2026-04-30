@@ -115,7 +115,7 @@ const AdminPanel = ({ onClose, onLogout }) => (
       <h2 className="text-2xl font-bold text-foreground">Admin Panel</h2>
       <button onClick={onLogout}
         className="w-full flex items-center justify-center gap-3 py-4 rounded-2xl bg-destructive text-destructive-foreground text-lg font-semibold active:scale-95 transition-transform">
-        <LogOut className="w-5 h-5" /> Log Out
+        <LogOut className="w-5 h-5" /> Switch Kiosk Account
       </button>
       <button onClick={onClose}
         className="w-full py-4 rounded-2xl bg-secondary text-secondary-foreground text-lg font-semibold border border-border active:scale-95 transition-transform">
@@ -615,8 +615,14 @@ const SelfCheckoutPage = () => {
   const handleLogout = useCallback(async () => {
     setAdminOverlay(null);
     clearIdleTimers();
+    if (window.electronAPI?.clearKioskCredentials) {
+      const result = await window.electronAPI.clearKioskCredentials();
+      if (!result?.ok) {
+        return;
+      }
+    }
     await signOut();
-    navigate('/login', { state: { from: '/selfcheckout', kioskMode: true } });
+    navigate('/kiosk-setup', { replace: true });
   }, [signOut, navigate, clearIdleTimers]);
 
   const handleKeepShopping = useCallback(() => {

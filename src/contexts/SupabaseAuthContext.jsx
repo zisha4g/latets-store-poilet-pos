@@ -18,28 +18,79 @@ export const AuthProvider = ({ children }) => {
     setLoading(false);
   }, []);
 
+  const applyKioskCredentials = useCallback(async (credentials, { persist = false, clearInstaller = false } = {}) => {
+    const { error } = await supabase.auth.signInWithPassword({
+      email: credentials.email,
+      password: credentials.password,
+    });
+
+    if (error) {
+      if (clearInstaller) {
+        await window.electronAPI?.clearInstallerCredentials?.();
+      }
+      await window.electronAPI?.clearKioskCredentials?.();
+      handleSession(null);
+      return false;
+    }
+
+    if (persist) {
+      const saveResult = await window.electronAPI?.saveKioskCredentials?.(credentials);
+      if (saveResult?.ok) {
+        if (clearInstaller) {
+          await window.electronAPI?.clearInstallerCredentials?.();
+        }
+      } else if (saveResult?.error) {
+        toast({
+          variant: "destructive",
+          title: "Kiosk Save Failed",
+          description: saveResult.error,
+        });
+      }
+    }
+
+    const { data: { session } } = await supabase.auth.getSession();
+    handleSession(session);
+    return true;
+  }, [handleSession, toast]);
+
   useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        handleSession(session);
+      }
+    );
+
     const getSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
 
-      if (!session && window.electronAPI?.getKioskCredentials) {
-        // Electron kiosk: try to auto-login with saved credentials
-        const creds = await window.electronAPI.getKioskCredentials();
-        if (creds) {
-          // Attempt silent sign-in; keep loading=true so ProtectedRoute shows spinner
-          // onAuthStateChange will fire and call handleSession when it succeeds
-          const { error } = await supabase.auth.signInWithPassword({
-            email: creds.email,
-            password: creds.password,
-          });
-          if (error) {
-            // Credentials failed (e.g. password changed) — fall through to unauthenticated state
-            handleSession(null);
+      if (window.electronAPI?.getKioskCredentials) {
+        const installerCreds = await window.electronAPI.getInstallerCredentials?.();
+        const kioskCreds = await window.electronAPI.getKioskCredentials();
+        const desiredCreds = installerCreds || kioskCreds;
+
+        if (desiredCreds) {
+          const currentEmail = session?.user?.email || null;
+
+          if (currentEmail !== desiredCreds.email) {
+            if (session) {
+              await supabase.auth.signOut({ scope: 'local' });
+            }
+
+            await applyKioskCredentials(desiredCreds, {
+              persist: !!installerCreds,
+              clearInstaller: !!installerCreds,
+            });
+            return;
           }
-          // On success, onAuthStateChange handles setting session/loading
+
+          if (installerCreds) {
+            await window.electronAPI.saveKioskCredentials?.(installerCreds);
+            await window.electronAPI.clearInstallerCredentials?.();
+          }
+
+          handleSession(session);
           return;
         }
-        // No saved credentials — fall through; ProtectedRoute redirects to /kiosk-setup
       }
 
       handleSession(session);
@@ -47,14 +98,8 @@ export const AuthProvider = ({ children }) => {
 
     getSession();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        handleSession(session);
-      }
-    );
-
     return () => subscription.unsubscribe();
-  }, [handleSession]);
+  }, [applyKioskCredentials, handleSession]);
 
   const signUp = useCallback(async (email, password, options) => {
     const { error } = await supabase.auth.signUp({
@@ -92,7 +137,7 @@ export const AuthProvider = ({ children }) => {
   }, [toast]);
 
   const signOut = useCallback(async () => {
-    const { error } = await supabase.auth.signOut();
+    const { error } = await supabase.auth.signOut({ scope: 'local' });
 
     if (error) {
       toast({

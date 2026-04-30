@@ -9,6 +9,7 @@ const tables = [
   'settings', 'chart_of_accounts', 'journal_entries', 'vendor_bills',
   'purchase_orders',
   'deliveries',
+  'phone_call_sessions',
   'appointments', 'tasks',
   'pbx_business_hours', 'pbx_ivr_menus', 'pbx_audio_files', 'pbx_extensions', 'pbx_call_logs', 'pbx_voicemails'
 ];
@@ -48,6 +49,7 @@ export function useDataManagement(user, isDemo = false) {
     vendors: [], 
     saved_carts: [], 
     deliveries: [],
+    phone_call_sessions: [],
     taxes: [], 
     service_charges: [],
     settings: {}, 
@@ -125,6 +127,7 @@ export function useDataManagement(user, isDemo = false) {
         vendors: fetchedData.vendors || [],
         saved_carts: fetchedData.saved_carts || [],
         deliveries: fetchedData.deliveries || [],
+        phone_call_sessions: fetchedData.phone_call_sessions || [],
         taxes: fetchedData.taxes || [],
         service_charges: fetchedData.service_charges || [],
         settings: settingsObject,

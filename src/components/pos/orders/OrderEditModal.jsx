@@ -10,7 +10,7 @@ import { Card } from '@/components/ui/card';
 import { toast } from '@/components/ui/use-toast';
 import { Trash2, Plus, Minus, Package, Search, UserCog, UserPlus } from 'lucide-react';
 
-const OrderEditModal = ({ open, onClose, delivery, customer, sale, handlers, products = [], customers = [] }) => {
+const OrderEditModal = ({ open, onClose, delivery, customer, sale, voiceDetails = null, customerMatches = [], handlers, products = [], customers = [] }) => {
   const [address, setAddress] = useState('');
   const [instructions, setInstructions] = useState('');
   const [status, setStatus] = useState('pending');
@@ -247,6 +247,14 @@ const OrderEditModal = ({ open, onClose, delivery, customer, sale, handlers, pro
     setShowCustomerDropdown(false);
   };
 
+  const chooseCustomerForThisOrder = (c) => {
+    setCustomerMode('order');
+    setCreatingNewCustomer(false);
+    setSelectedNewCustomer(c);
+    setCustomerSearch('');
+    setShowCustomerDropdown(false);
+  };
+
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -391,6 +399,60 @@ const OrderEditModal = ({ open, onClose, delivery, customer, sale, handlers, pro
               </div>
             )}
           </div>
+
+          {/* Same-phone customers quick picker */}
+          {customerMatches.length > 0 && (
+            <div className="space-y-2">
+              <Label>Customers With Same Phone Number</Label>
+              <Card className="p-3 space-y-2">
+                {customerMatches.map((c) => (
+                  <div key={c.id} className="flex items-center justify-between gap-3 border rounded-md px-3 py-2">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium truncate">{c.name || 'Unnamed Customer'}</div>
+                      <div className="text-xs text-muted-foreground truncate">{c.phone || '—'}</div>
+                    </div>
+                    {c.id === customer?.id ? (
+                      <span className="text-[11px] text-muted-foreground">Current</span>
+                    ) : (
+                      <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => chooseCustomerForThisOrder(c)}>
+                        Use for This Order
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </Card>
+            </div>
+          )}
+
+          {/* Voice details */}
+          {(voiceDetails?.url || voiceDetails?.streetTranscript || voiceDetails?.addressTranscript) && (
+            <div className="space-y-2">
+              <Label>Voice Call Details</Label>
+              <Card className="p-3 space-y-3">
+                {voiceDetails?.url && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">Street/Address Recording</p>
+                    <audio controls preload="none" src={voiceDetails.url} className="w-full" />
+                  </div>
+                )}
+                {voiceDetails?.streetTranscript && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">Street Transcript</p>
+                    <p className="text-sm break-words">{voiceDetails.streetTranscript}</p>
+                  </div>
+                )}
+                {voiceDetails?.addressTranscript && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">Address Transcript</p>
+                    <p className="text-sm break-words">{voiceDetails.addressTranscript}</p>
+                  </div>
+                )}
+                {voiceDetails?.providerCallId && (
+                  <p className="text-[11px] text-muted-foreground">Call ID: {voiceDetails.providerCallId}</p>
+                )}
+              </Card>
+            </div>
+          )}
 
           {/* Address */}
           <div className="space-y-2">

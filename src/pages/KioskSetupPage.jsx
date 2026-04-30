@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/customSupabaseClient';
 
-export default function KioskSetupPage() {
+function KioskSetupPage() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -11,13 +11,18 @@ export default function KioskSetupPage() {
   const [isRetry, setIsRetry] = useState(false);
 
   useEffect(() => {
-    // Check if credentials were saved before (failed login scenario)
     const checkExisting = async () => {
       if (window.electronAPI?.getKioskCredentials) {
         const creds = await window.electronAPI.getKioskCredentials();
         if (creds) {
           setIsRetry(true);
           setEmail(creds.email);
+          return;
+        }
+
+        const installerCreds = await window.electronAPI.getInstallerCredentials?.();
+        if (installerCreds) {
+          setEmail(installerCreds.email);
         }
       }
     };
@@ -29,7 +34,6 @@ export default function KioskSetupPage() {
     setError('');
     setLoading(true);
 
-    // Verify credentials work before saving
     const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
 
     if (signInError) {
@@ -38,7 +42,6 @@ export default function KioskSetupPage() {
       return;
     }
 
-    // Save credentials to encrypted local config
     if (window.electronAPI?.saveKioskCredentials) {
       const result = await window.electronAPI.saveKioskCredentials({ email, password });
       if (!result.ok) {
@@ -46,9 +49,10 @@ export default function KioskSetupPage() {
         setLoading(false);
         return;
       }
+
+      await window.electronAPI.clearInstallerCredentials?.();
     }
 
-    // Navigate to kiosk
     navigate('/selfcheckout', { replace: true });
   };
 
@@ -92,7 +96,7 @@ export default function KioskSetupPage() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
+              placeholder="********"
               className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               autoComplete="current-password"
             />
@@ -109,7 +113,7 @@ export default function KioskSetupPage() {
             disabled={loading}
             className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-semibold rounded-lg px-4 py-3 transition-colors"
           >
-            {loading ? 'Verifying…' : isRetry ? 'Update & Continue' : 'Save & Launch Kiosk'}
+            {loading ? 'Verifying...' : isRetry ? 'Update & Continue' : 'Save & Launch Kiosk'}
           </button>
         </form>
 
@@ -120,3 +124,5 @@ export default function KioskSetupPage() {
     </div>
   );
 }
+
+export default KioskSetupPage;
