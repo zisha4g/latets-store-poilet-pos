@@ -412,15 +412,27 @@ const escapeXml = (value: string) =>
 const gatherResponse = (
   prompt: string,
   actionUrl: string,
-  options?: { numDigits?: number | null; finishOnKey?: string | null },
+  options?: {
+    numDigits?: number | null;
+    finishOnKey?: string | null;
+    voice?: string | null;
+    rate?: string | null;
+    audioUrl?: string | null;
+  },
 ) => {
   const numDigitsAttr = options?.numDigits ? ` numDigits="${options.numDigits}"` : "";
   const finishOnKeyAttr = options?.finishOnKey ? ` finishOnKey="${options.finishOnKey}"` : "";
+  const voiceAttr = options?.voice ? ` voice="${escapeXml(options.voice)}"` : "";
+  const inner = options?.audioUrl
+    ? `<Play>${escapeXml(options.audioUrl)}</Play>`
+    : (options?.rate
+        ? `<Say${voiceAttr}><prosody rate="${escapeXml(options.rate)}">${escapeXml(prompt)}</prosody></Say>`
+        : `<Say${voiceAttr}>${escapeXml(prompt)}</Say>`);
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Gather input="dtmf" timeout="7" action="${escapeXml(actionUrl)}" method="POST"${numDigitsAttr}${finishOnKeyAttr}>
-    <Say>${escapeXml(prompt)}</Say>
+    ${inner}
   </Gather>
   <Redirect method="POST">${escapeXml(actionUrl)}</Redirect>
 </Response>`;
@@ -440,6 +452,215 @@ const sayAndHangup = (prompt: string) => `<?xml version="1.0" encoding="UTF-8"?>
 </Response>`;
 
 const errorXml = (prompt: string) => toXmlResponse(sayAndHangup(prompt));
+
+// ─────────── Call routing tree helpers ───────────
+type RoutingNode =
+  | { type: "flow"; flowId: string | null }
+  | { type: "forward"; number: string; callerIdPassthrough?: boolean }
+  | { type: "play"; message: string; voice?: string }
+  | { type: "voicemail"; greeting?: string; notifySms?: string; notifyEmail?: string }
+  | { type: "business_hours"; open: RoutingNode; closed: RoutingNode }
+  | { type: "extension"; extensionId: string }
+  | {
+      type: "ivr_menu";
+      menuId?: string | null;
+      prompt?: string;
+      promptVoice?: string | null;
+      promptRate?: string | null;
+      promptAudioUrl?: string | null;
+      options?: Record<string, RoutingNode>;
+    };
+
+const isStoreOpenNow = async (
+  // deno-lint-ignore no-explicit-any
+  adminClient: any,
+  userId: string,
+): Promise<boolean> => {
+  const { data: rows } = await adminClient
+    .from("pbx_business_hours")
+    .select("day_of_week, is_open, open_time, close_time")
+    .eq("user_id", userId);
+  if (!rows || !rows.length) return true; // no hours configured → assume open
+  const now = new Date();
+  // Use UTC day index to keep behavior deterministic; store hours are stored in
+  // local store time without TZ context. For v1 we treat them as UTC so calls
+  // mirror the admin's saved hours; per-store TZ override is a follow-up.
+  const dow = now.getUTCDay();
+  const today = rows.find((r: { day_of_week: number }) => r.day_of_week === dow);
+  if (!today || !today.is_open) return false;
+  const hh = String(now.getUTCHours()).padStart(2, "0");
+  const mm = String(now.getUTCMinutes()).padStart(2, "0");
+  const cur = `${hh}:${mm}`;
+  const open = String(today.open_time ?? "00:00").slice(0, 5);
+  const close = String(today.close_time ?? "23:59").slice(0, 5);
+  return cur >= open && cur <= close;
+};
+
+const dialResponse = (number: string, callerIdPassthrough = false, fromNumber?: string) => {
+  const callerIdAttr = callerIdPassthrough && fromNumber ? ` callerId="${escapeXml(fromNumber)}"` : "";
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Dial timeout="20"${callerIdAttr}>${escapeXml(number)}</Dial>
+</Response>`;
+};
+
+// Builds a parallel <Dial> verb that rings every enabled SIP/PSTN ringer
+// configured on an extension. SignalWire will POST back to `actionUrl` once
+// the dial completes (DialCallStatus = answered | no-answer | busy | failed
+// | canceled). WebRTC ringers are intentionally skipped here — the screen
+// pop / browser ring is handled by a Realtime broadcast (Step 5).
+// Group enabled ringers into tiers by kind, in priority order. TwiML forbids
+// mixing <Sip> and <Number> in the same <Dial>, so we ring each tier in turn:
+// SIP children together, then PSTN children together. Within a tier all
+// ringers ring in parallel; if no one answers, we move to the next tier.
+type RingerTier = { kind: "sip" | "pstn"; targets: string[] };
+
+const buildRingerTiers = (
+  ringers: Array<{ kind: string; target: string; enabled: boolean; priority?: number | null }>,
+): RingerTier[] => {
+  const sorted = [...ringers]
+    .filter((r) => r.enabled && r.target)
+    .sort((a, b) => (Number(a.priority ?? 0) - Number(b.priority ?? 0)));
+
+  const sipTargets: string[] = [];
+  const pstnTargets: string[] = [];
+  for (const r of sorted) {
+    const target = String(r.target).trim();
+    if (r.kind === "sip") {
+      sipTargets.push(target.startsWith("sip:") ? target : `sip:${target}`);
+    } else if (r.kind === "pstn") {
+      const e164 = normalizePhone(target);
+      if (e164) pstnTargets.push(e164);
+    }
+    // webrtc: out-of-band screen-pop via Realtime broadcast (Step 5)
+  }
+  const tiers: RingerTier[] = [];
+  if (sipTargets.length) tiers.push({ kind: "sip", targets: sipTargets });
+  if (pstnTargets.length) tiers.push({ kind: "pstn", targets: pstnTargets });
+  return tiers;
+};
+
+const extensionDialResponseForTier = (
+  tier: RingerTier | null,
+  options: { timeout: number; actionUrl: string; callerId?: string | null },
+) => {
+  // No remaining tier — Redirect with synthetic no-answer so the state machine
+  // can fall through to voicemail/forward/hangup.
+  if (!tier || !tier.targets.length) {
+    const sep = options.actionUrl.includes("?") ? "&" : "?";
+    const redirectUrl = `${options.actionUrl}${sep}DialCallStatus=no-answer&NoRingers=1`;
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Redirect method="POST">${escapeXml(redirectUrl)}</Redirect>
+</Response>`;
+  }
+
+  const children = tier.kind === "sip"
+    ? tier.targets.map((t) => `  <Sip>${escapeXml(t)}</Sip>`)
+    : tier.targets.map((t) => `  <Number>${escapeXml(t)}</Number>`);
+
+  const callerIdAttr = options.callerId ? ` callerId="${escapeXml(options.callerId)}"` : "";
+  const timeout = Math.max(5, Math.min(120, options.timeout || 25));
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Dial timeout="${timeout}" action="${escapeXml(options.actionUrl)}" method="POST"${callerIdAttr}>
+${children.join("\n")}
+  </Dial>
+</Response>`;
+};
+
+const voicemailResponse = (greeting: string, actionUrl: string) => `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say>${escapeXml(greeting)}</Say>
+  <Record timeout="5" maxLength="120" playBeep="true" action="${escapeXml(actionUrl)}" method="POST" />
+  <Say>We did not record anything. Goodbye.</Say>
+  <Hangup />
+</Response>`;
+
+// Walk a routing tree given a digit path. Returns either a menu (caller still
+// needs to press) or a leaf action.
+const walkRouting = async (
+  // deno-lint-ignore no-explicit-any
+  adminClient: any,
+  userId: string,
+  routing: RoutingNode,
+  path: string[],
+): Promise<{ kind: "menu"; node: RoutingNode } | { kind: "leaf"; node: RoutingNode }> => {
+  let cur: RoutingNode | undefined = routing;
+  let i = 0;
+  while (cur) {
+    if (cur.type === "business_hours") {
+      const open = await isStoreOpenNow(adminClient, userId);
+      cur = open ? cur.open : cur.closed;
+      continue;
+    }
+    if (cur.type === "ivr_menu") {
+      // Reference to a reusable IVR menu (built in PBX → IVR / Auto attendant).
+      // Hydrate inline so the rest of the walker can treat it as a normal menu.
+      if (cur.menuId && (!cur.options || typeof cur.options !== "object")) {
+        const { data: menu } = await adminClient
+          .from("pbx_ivr_menus")
+          .select("id, name, options, prompt_text, prompt_voice, prompt_rate, prompt_audio_id")
+          .eq("id", cur.menuId)
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (!menu) {
+          return { kind: "leaf", node: { type: "play", message: "This menu is not available right now. Goodbye." } };
+        }
+        let promptAudioUrl: string | null = null;
+        if (menu.prompt_audio_id) {
+          const { data: af } = await adminClient
+            .from("pbx_audio_files")
+            .select("file_url")
+            .eq("id", menu.prompt_audio_id)
+            .eq("user_id", userId)
+            .maybeSingle();
+          promptAudioUrl = af?.file_url ?? null;
+        }
+        const opts: Record<string, RoutingNode> = {};
+        for (const o of (menu.options as Array<Record<string, unknown>>) || []) {
+          const key = String(o?.key ?? "");
+          if (!/^[0-9*#]$/.test(key)) continue;
+          const action = String(o?.action_type ?? "");
+          const value = String(o?.action_value ?? "");
+          if (action === "voicemail") {
+            opts[key] = { type: "voicemail", greeting: "Please leave a message after the beep." };
+          } else if (action === "go_to_menu" && value) {
+            opts[key] = { type: "ivr_menu", menuId: value };
+          } else if (action === "transfer_to_flow") {
+            opts[key] = { type: "flow", flowId: value || null };
+          } else if (action === "play_audio") {
+            opts[key] = { type: "play", message: "Thank you. Goodbye." };
+          } else if (action === "forward_to_extension") {
+            opts[key] = value
+              ? { type: "extension", extensionId: value }
+              : { type: "play", message: "This option is not configured. Goodbye." };
+          }
+        }
+        cur = {
+          type: "ivr_menu",
+          prompt: String(menu.prompt_text || cur.prompt || `You have reached ${menu.name || "the menu"}. Please make a selection.`),
+          promptVoice: (menu.prompt_voice as string | null) ?? null,
+          promptRate: (menu.prompt_rate as string | null) ?? null,
+          promptAudioUrl,
+          options: opts,
+        };
+      }
+      if (i < (path?.length ?? 0)) {
+        const digit = path[i++];
+        const next = (cur.options || {})[digit];
+        if (!next) {
+          return { kind: "leaf", node: { type: "play", message: "Sorry, that is not a valid option. Goodbye." } };
+        }
+        cur = next;
+        continue;
+      }
+      return { kind: "menu", node: cur };
+    }
+    return { kind: "leaf", node: cur };
+  }
+  return { kind: "leaf", node: { type: "play", message: "This number is not configured. Goodbye." } };
+};
 
 const ensureHttpsUrl = (url: string) => {
   if (!url) return url;
@@ -1173,7 +1394,7 @@ Deno.serve(async (req: Request) => {
   const adminClient = createSupabaseClient(supabaseUrl, supabaseServiceKey);
   const { data: channel, error: channelError } = await adminClient
     .from("store_channels")
-    .select("id, user_id, webhook_secret, voice_ordering_enabled, is_active")
+    .select("id, user_id, webhook_secret, voice_ordering_enabled, is_active, configured, routing, label, inbound_phone_e164")
     .in("inbound_phone_e164", phoneCandidates)
     .maybeSingle();
 
@@ -1182,14 +1403,17 @@ Deno.serve(async (req: Request) => {
     return errorXml("Store routing is temporarily unavailable.");
   }
 
-  if (!channel || !channel.is_active || !channel.voice_ordering_enabled) {
+  if (!channel || !channel.is_active) {
     console.log("voice-webhook channel unavailable", {
       found: !!channel,
       isActive: channel?.is_active ?? null,
-      voiceEnabled: channel?.voice_ordering_enabled ?? null,
       phoneCandidates,
     });
-    return toXmlResponse(`<?xml version="1.0" encoding="UTF-8"?><Response><Say>This store is not enabled for phone ordering.</Say><Hangup /></Response>`);
+    return errorXml("This number is not in service. Please contact the store.");
+  }
+
+  if (!channel.configured) {
+    return errorXml("This number has not been configured yet. Please contact the store.");
   }
 
   if (channel.webhook_secret) {
@@ -1208,14 +1432,416 @@ Deno.serve(async (req: Request) => {
     .eq("provider_call_id", providerCallId)
     .maybeSingle();
 
-  const { data: flowConfig } = await adminClient
+  // ─────────── Call routing layer ───────────
+  // Routing tree decides what to do with this call (run a flow / forward /
+  // play message / voicemail / business-hours branch / IVR menu). Once we land
+  // on a "flow" leaf we set metadata.flow_id and fall through to the existing
+  // flow runner. Once any other leaf fires it terminates the call by itself.
+  const sessionMeta: JsonMap =
+    (existingSession?.metadata && typeof existingSession.metadata === "object")
+      ? (existingSession.metadata as JsonMap)
+      : {};
+  const sessionState = String(existingSession?.state ?? "");
+
+  // Post-dial leg: SignalWire calls back here when our <Dial> for an
+  // extension finishes. DialCallStatus tells us if anyone picked up.
+  if (sessionState === "routing_extension_dial") {
+    const dialStatus = String(body.DialCallStatus ?? body.dial_call_status ?? "").toLowerCase();
+
+    // Helper: dismiss the screen-pop popup on the assigned user's POS.
+    // Called whenever a terminal outcome happens (answered, voicemail, etc).
+    const broadcastRingStop = async (kind: "answered" | "declined" | "timeout" | "ring_stop") => {
+      try {
+        await adminClient.from("pbx_ring_events").insert({
+          user_id: channel.user_id,
+          assigned_user_id: (sessionMeta.assigned_user_id as string | null | undefined) || null,
+          event_type: kind,
+          call_session_id: existingSession?.id ?? null,
+          channel_id: channel.id,
+          extension_id: (sessionMeta.extension_id as string | null | undefined) || null,
+          extension_number: String(sessionMeta.extension_number ?? ""),
+          metadata: { dial_status: dialStatus },
+        });
+      } catch (ringErr) {
+        console.warn("voice-webhook ring_stop broadcast failed", ringErr);
+      }
+    };
+
+    // If the call was answered the bridged audio is already flowing — when
+    // the called party hangs up, SignalWire still POSTs back here. We just
+    // hang up gracefully.
+    if (dialStatus === "answered" || dialStatus === "completed") {
+      await adminClient
+        .from("phone_call_sessions")
+        .update({ call_status: "completed", state: "routing_extension_answered" })
+        .eq("id", existingSession!.id);
+      await broadcastRingStop("answered");
+      return toXmlResponse(`<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Hangup />\n</Response>`);
+    }
+
+    const noAnswerAction = String(sessionMeta.no_answer_action ?? "voicemail");
+    const forwardExternalNumber = String(sessionMeta.forward_external_number ?? "").trim();
+    const voicemailEnabled = sessionMeta.voicemail_enabled !== false;
+    const extNumber = sessionMeta.extension_number ?? "";
+
+    // Sequential ringer tiers: if the previous tier got no answer/busy/failed
+    // and we still have tiers left, ring the next one. This is how we ring
+    // SIP (desk) and PSTN (cell) one after another \u2014 TwiML forbids mixing
+    // them in the same <Dial>.
+    const pendingTiersRaw = Array.isArray(sessionMeta.pending_ringer_tiers)
+      ? (sessionMeta.pending_ringer_tiers as Array<{ kind: string; targets: string[] }>)
+      : [];
+    if (dialStatus !== "answered" && dialStatus !== "completed" && pendingTiersRaw.length > 0) {
+      const nextTier = pendingTiersRaw[0];
+      const remaining = pendingTiersRaw.slice(1);
+      const ringTimeout = Number(sessionMeta.ring_timeout_secs) || 25;
+      const callerId = (sessionMeta.caller_id_for_dial as string | null | undefined) || null;
+      await adminClient
+        .from("phone_call_sessions")
+        .update({
+          state: "routing_extension_dial",
+          metadata: { ...sessionMeta, pending_ringer_tiers: remaining },
+        })
+        .eq("id", existingSession!.id);
+      const xml = extensionDialResponseForTier(
+        nextTier && nextTier.targets && nextTier.targets.length
+          ? { kind: nextTier.kind === "pstn" ? "pstn" : "sip", targets: nextTier.targets }
+          : null,
+        { timeout: ringTimeout, actionUrl: callbackUrl, callerId },
+      );
+      return toXmlResponse(xml);
+    }
+
+    if (noAnswerAction === "forward_external" && forwardExternalNumber) {
+      const fromNumber = normalizePhone(String(body.From ?? body.from ?? ""));
+      await adminClient
+        .from("phone_call_sessions")
+        .update({
+          state: "routing_extension_forwarded",
+          metadata: { ...sessionMeta, forwarded_to: forwardExternalNumber },
+        })
+        .eq("id", existingSession!.id);
+      await broadcastRingStop("timeout");
+      return toXmlResponse(dialResponse(forwardExternalNumber, true, fromNumber));
+    }
+
+    if (noAnswerAction === "hangup" || (noAnswerAction === "voicemail" && !voicemailEnabled)) {
+      await adminClient
+        .from("phone_call_sessions")
+        .update({ call_status: "completed", state: "routing_extension_hangup" })
+        .eq("id", existingSession!.id);
+      await broadcastRingStop("timeout");
+      return toXmlResponse(sayAndHangup("Sorry, no one is available right now. Please call back later. Goodbye."));
+    }
+
+    // Default: voicemail
+    const greeting = `You have reached extension ${extNumber}. Please leave a message after the beep.`;
+    await adminClient
+      .from("phone_call_sessions")
+      .update({
+        state: "routing_voicemail",
+        metadata: { ...sessionMeta, came_from: "extension_no_answer" },
+      })
+      .eq("id", existingSession!.id);
+    await broadcastRingStop("timeout");
+    return toXmlResponse(voicemailResponse(greeting, callbackUrl));
+  }
+
+  // Voicemail leg: Twilio just POSTed the recording for our <Record action>.
+  if (sessionState === "routing_voicemail" && (body.RecordingUrl || body.recording_url)) {
+    const recordingUrl = String(body.RecordingUrl ?? body.recording_url ?? "");
+    const duration = Number(body.RecordingDuration ?? body.recording_duration ?? 0) || null;
+    const fromNumber = normalizePhone(String(body.From ?? body.from ?? ""));
+    const extensionId = (sessionMeta.extension_id as string | undefined) || null;
+    // Write to pbx_voicemails — that's what the PBX → Voicemails view reads.
+    const { error: vmErr } = await adminClient.from("pbx_voicemails").insert({
+      user_id: channel.user_id,
+      channel_id: channel.id,
+      extension_id: extensionId,
+      from_number: fromNumber || null,
+      recording_url: recordingUrl || null,
+      duration_seconds: duration,
+    });
+    if (vmErr) {
+      console.error("voice-webhook voicemail insert failed", vmErr);
+      // Fallback to legacy table so we still keep a record.
+      await adminClient.from("voicemails").insert({
+        user_id: channel.user_id,
+        channel_id: channel.id,
+        from_number: fromNumber || null,
+        recording_url: recordingUrl || null,
+        duration_seconds: duration,
+      });
+    }
+    await adminClient
+      .from("phone_call_sessions")
+      .update({
+        call_status: "completed",
+        state: "routing_voicemail_done",
+        metadata: { ...sessionMeta, voicemail_url: recordingUrl },
+      })
+      .eq("id", existingSession!.id);
+    return toXmlResponse(sayAndHangup("Thank you. Your message has been received. Goodbye."));
+  }
+
+  // Resolve which flow id to use (if any). If routing has already picked a
+  // flow on a previous turn, reuse it.
+  let selectedFlowId: string | null = (typeof sessionMeta.flow_id === "string" ? sessionMeta.flow_id as string : null);
+  let routingMeta: JsonMap = sessionMeta;
+
+  if (!selectedFlowId) {
+    const routingTree: RoutingNode = (channel.routing && typeof channel.routing === "object")
+      ? channel.routing as RoutingNode
+      : { type: "flow", flowId: null };
+
+    // Build the digit path for routing menus: previous path + this turn's digits
+    // (only when caller is responding to a routing menu, not a flow gather).
+    const prevPath: string[] = Array.isArray(sessionMeta.routing_path)
+      ? (sessionMeta.routing_path as string[]).filter((d) => typeof d === "string")
+      : [];
+    const newDigit = String(body.Digits ?? body.digits ?? "").trim();
+    const path = (sessionState === "routing_menu" && newDigit) ? [...prevPath, newDigit] : prevPath;
+
+    const resolved = await walkRouting(adminClient, channel.user_id, routingTree, path);
+
+    if (resolved.kind === "menu") {
+      const menu = resolved.node as Extract<RoutingNode, { type: "ivr_menu" }>;
+      const xml = gatherResponse(menu.prompt || "", callbackUrl, {
+        numDigits: 1,
+        voice: menu.promptVoice ?? null,
+        rate: menu.promptRate ?? null,
+        audioUrl: menu.promptAudioUrl ?? null,
+      });
+      const upsertPayload = {
+        user_id: channel.user_id,
+        store_channel_id: channel.id,
+        provider: "signalwire",
+        provider_call_id: providerCallId,
+        call_status: String(body.CallStatus ?? body.call_status ?? "in_progress"),
+        state: "routing_menu",
+        last_digits: newDigit || null,
+        cart: existingSession?.cart ?? [],
+        address_recording_url: existingSession?.address_recording_url ?? null,
+        address_transcript: existingSession?.address_transcript ?? null,
+        payment_status: existingSession?.payment_status ?? "pending",
+        metadata: { ...sessionMeta, routing_path: path },
+      };
+      const { error: sErr } = await adminClient
+        .from("phone_call_sessions")
+        .upsert(upsertPayload, { onConflict: "provider,provider_call_id" });
+      if (sErr) console.error("voice-webhook routing menu upsert failed", sErr);
+      return toXmlResponse(xml);
+    }
+
+    // Leaf
+    const leaf = resolved.node;
+    if (leaf.type === "forward") {
+      const fromNumber = normalizePhone(String(body.From ?? body.from ?? ""));
+      const xml = dialResponse(leaf.number, !!leaf.callerIdPassthrough, fromNumber);
+      await adminClient
+        .from("phone_call_sessions")
+        .upsert({
+          user_id: channel.user_id,
+          store_channel_id: channel.id,
+          provider: "signalwire",
+          provider_call_id: providerCallId,
+          call_status: String(body.CallStatus ?? body.call_status ?? "in_progress"),
+          state: "routing_forward",
+          metadata: { ...sessionMeta, routing_path: path, forward_to: leaf.number },
+        }, { onConflict: "provider,provider_call_id" });
+      return toXmlResponse(xml);
+    }
+    if (leaf.type === "play") {
+      await adminClient
+        .from("phone_call_sessions")
+        .upsert({
+          user_id: channel.user_id,
+          store_channel_id: channel.id,
+          provider: "signalwire",
+          provider_call_id: providerCallId,
+          call_status: "completed",
+          state: "routing_play",
+          metadata: { ...sessionMeta, routing_path: path },
+        }, { onConflict: "provider,provider_call_id" });
+      return toXmlResponse(sayAndHangup(leaf.message));
+    }
+    if (leaf.type === "voicemail") {
+      const greeting = leaf.greeting?.trim() || "Please leave a message after the beep.";
+      const xml = voicemailResponse(greeting, callbackUrl);
+      await adminClient
+        .from("phone_call_sessions")
+        .upsert({
+          user_id: channel.user_id,
+          store_channel_id: channel.id,
+          provider: "signalwire",
+          provider_call_id: providerCallId,
+          call_status: String(body.CallStatus ?? body.call_status ?? "in_progress"),
+          state: "routing_voicemail",
+          metadata: {
+            ...sessionMeta,
+            routing_path: path,
+            vm_notify_sms: leaf.notifySms ?? null,
+            vm_notify_email: leaf.notifyEmail ?? null,
+          },
+        }, { onConflict: "provider,provider_call_id" });
+      return toXmlResponse(xml);
+    }
+    if (leaf.type === "extension") {
+      // Look up the extension + its configured ringers and dial them all in
+      // parallel. SignalWire will call us back when the dial completes —
+      // sessionState "routing_extension_dial" handles that callback below.
+      const { data: ext } = await adminClient
+        .from("pbx_extensions")
+        .select("id, name, extension_number, ring_timeout_secs, no_answer_action, forward_external_number, voicemail_enabled, email_for_voicemail, assigned_user_id")
+        .eq("id", leaf.extensionId)
+        .eq("user_id", channel.user_id)
+        .maybeSingle();
+
+      if (!ext) {
+        return toXmlResponse(sayAndHangup("That extension is no longer available. Goodbye."));
+      }
+
+      const { data: ringers } = await adminClient
+        .from("pbx_extension_ringers")
+        .select("kind, target, enabled, priority")
+        .eq("extension_id", ext.id)
+        .eq("user_id", channel.user_id)
+        .order("priority", { ascending: true });
+
+      // Resolve webrtc ringers (target = "webrtc:<user_id>") to concrete SIP
+      // URIs by looking up the per-user browser SIP credential. This makes
+      // the browser softphone ring in parallel with desk phones.
+      const resolvedRingers: Array<{ kind: string; target: string; enabled: boolean; priority?: number | null }> = [];
+      for (const r of (ringers || [])) {
+        if (r.kind === "webrtc" && typeof r.target === "string" && r.target.startsWith("webrtc:")) {
+          const targetUserId = r.target.slice("webrtc:".length);
+          const { data: ep } = await adminClient
+            .from("pbx_webrtc_endpoints")
+            .select("sip_username, sip_domain, enabled")
+            .eq("user_id", targetUserId)
+            .maybeSingle();
+          if (ep && ep.enabled && ep.sip_username && ep.sip_domain) {
+            resolvedRingers.push({
+              kind: "sip",
+              target: `sip:${ep.sip_username}@${ep.sip_domain}`,
+              enabled: r.enabled,
+              priority: r.priority,
+            });
+          }
+          continue;
+        }
+        resolvedRingers.push(r);
+      }
+
+      console.log("voice-webhook extension dial", {
+        extensionId: ext.id,
+        extensionNumber: ext.extension_number,
+        ringerCount: resolvedRingers.length,
+        ringers: resolvedRingers.map((r) => ({ kind: r.kind, target: r.target, enabled: r.enabled })),
+      });
+
+      const fromNumber = normalizePhone(String(body.From ?? body.from ?? ""));
+      // For outbound PSTN dialing SignalWire requires a callerId that is owned
+      // (or verified) on the account AND in E.164 format. The caller's own
+      // number isn't owned, so using it silently kills the <Number> leg while
+      // <Sip> succeeds. Use the store's DID instead — and force E.164: the
+      // raw column value sometimes lacks the `+1` and that alone causes the
+      // PSTN child to fail before it ever rings.
+      const callerIdForDial =
+        normalizePhone(String(channel.inbound_phone_e164 || "")) || fromNumber || null;
+      const tiers = buildRingerTiers(resolvedRingers);
+      const ringTimeout = Number(ext.ring_timeout_secs) || 25;
+      const xml = extensionDialResponseForTier(tiers[0] || null, {
+        timeout: ringTimeout,
+        actionUrl: callbackUrl,
+        callerId: callerIdForDial,
+      });
+
+      await adminClient
+        .from("phone_call_sessions")
+        .upsert({
+          user_id: channel.user_id,
+          store_channel_id: channel.id,
+          provider: "signalwire",
+          provider_call_id: providerCallId,
+          call_status: String(body.CallStatus ?? body.call_status ?? "in_progress"),
+          state: "routing_extension_dial",
+          metadata: {
+            ...sessionMeta,
+            routing_path: path,
+            extension_id: ext.id,
+            extension_number: ext.extension_number,
+            no_answer_action: ext.no_answer_action || "voicemail",
+            forward_external_number: ext.forward_external_number || null,
+            voicemail_enabled: ext.voicemail_enabled !== false,
+            email_for_voicemail: ext.email_for_voicemail || null,
+            assigned_user_id: ext.assigned_user_id || null,
+            ring_timeout_secs: ringTimeout,
+            caller_id_for_dial: callerIdForDial,
+            // Remaining tiers to ring after this one finishes with no answer.
+            pending_ringer_tiers: tiers.slice(1),
+          },
+        }, { onConflict: "provider,provider_call_id" });
+
+      // Fire a screen-pop event for the assigned user (Step 5). Frontend
+      // subscribes to pbx_ring_events via Realtime and shows the popup.
+      // Best-effort — never block the dial if this fails.
+      try {
+        const { data: existingSessionForRing } = await adminClient
+          .from("phone_call_sessions")
+          .select("id")
+          .eq("provider", "signalwire")
+          .eq("provider_call_id", providerCallId)
+          .maybeSingle();
+        await adminClient.from("pbx_ring_events").insert({
+          user_id: channel.user_id,
+          assigned_user_id: ext.assigned_user_id || null,
+          event_type: "ring_start",
+          call_session_id: existingSessionForRing?.id ?? null,
+          channel_id: channel.id,
+          extension_id: ext.id,
+          extension_number: String(ext.extension_number ?? ""),
+          from_number: fromNumber || null,
+          caller_name: String(body.CallerName ?? body.caller_name ?? "") || null,
+          ring_timeout_secs: ringTimeout,
+          metadata: {
+            channel_label: channel.label || null,
+            extension_name: ext.name || null,
+          },
+        });
+      } catch (ringErr) {
+        console.warn("voice-webhook ring_start broadcast failed", ringErr);
+      }
+
+      return toXmlResponse(xml);
+    }
+    if (leaf.type === "flow") {
+      // Voice ordering must be enabled on this channel for flows to run.
+      if (!channel.voice_ordering_enabled) {
+        return errorXml("This store is not enabled for phone ordering.");
+      }
+      selectedFlowId = leaf.flowId ?? null;
+      routingMeta = { ...sessionMeta, routing_path: path, flow_id: selectedFlowId };
+    } else {
+      // Unknown leaf type — fail safe.
+      return errorXml("This number is not configured correctly.");
+    }
+  }
+
+  // Make the routing decision visible to the flow runner & the upsert below.
+  const baseMetadata: JsonMap = routingMeta;
+
+  const flowQuery = adminClient
     .from("ivr_flow_configs")
-    .select("flow")
-    .eq("user_id", channel.user_id)
-    .eq("is_primary", true)
-    .eq("is_active", true)
-    .eq("published", true)
-    .maybeSingle();
+    .select("flow, id");
+  const { data: flowConfig } = selectedFlowId
+    ? await flowQuery.eq("id", selectedFlowId).eq("user_id", channel.user_id).maybeSingle()
+    : await flowQuery
+        .eq("user_id", channel.user_id)
+        .eq("is_primary", true)
+        .eq("is_active", true)
+        .eq("published", true)
+        .maybeSingle();
 
   const voiceSettings = (
     flowConfig?.flow && typeof flowConfig.flow === "object"
@@ -1237,8 +1863,8 @@ Deno.serve(async (req: Request) => {
 
   const existingMetadata =
     existingSession?.metadata && typeof existingSession.metadata === "object"
-      ? (existingSession.metadata as JsonMap)
-      : {};
+      ? { ...(existingSession.metadata as JsonMap), ...baseMetadata }
+      : baseMetadata;
 
   let runtimeResult:
     | {
@@ -1280,7 +1906,7 @@ Deno.serve(async (req: Request) => {
     address_recording_url: runtimeResult.addressRecordingUrl,
     address_transcript: runtimeResult.addressTranscript,
     payment_status: runtimeResult.paymentStatus ?? existingSession?.payment_status ?? "pending",
-    metadata: runtimeResult.nextMetadata,
+    metadata: { ...runtimeResult.nextMetadata, flow_id: selectedFlowId ?? (runtimeResult.nextMetadata as JsonMap).flow_id ?? null },
   };
 
   const { error: sessionError } = await adminClient

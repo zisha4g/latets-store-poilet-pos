@@ -13,25 +13,32 @@ export function usePbxManager(user) {
 
   const fetchPbxData = useCallback(async () => {
     if (!user) return;
-    const [hoursRes, ivrRes, audioRes, extRes, logsRes, voicemailsRes] = await Promise.all([
+    const [hoursRes, ivrRes, audioRes, extRes, ringersRes, logsRes, voicemailsRes] = await Promise.all([
       supabase.from('pbx_business_hours').select('*').eq('user_id', user.id),
       supabase.from('pbx_ivr_menus').select('*').eq('user_id', user.id),
       supabase.from('pbx_audio_files').select('*').eq('user_id', user.id),
       supabase.from('pbx_extensions').select('*').eq('user_id', user.id),
+      supabase.from('pbx_extension_ringers').select('*').eq('user_id', user.id).order('priority', { ascending: true }),
       supabase.from('pbx_call_logs').select('*, customers(name)').eq('user_id', user.id).order('created_at', { ascending: false }),
       supabase.from('pbx_voicemails').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
     ]);
+
+    const allRingers = ringersRes.data || [];
+    const extensionsWithRingers = (extRes.data || []).map((e) => ({
+      ...e,
+      ringers: allRingers.filter((r) => r.extension_id === e.id),
+    }));
 
     setPbxData({
       businessHours: hoursRes.data || [],
       ivrMenus: ivrRes.data || [],
       audioFiles: audioRes.data || [],
-      extensions: extRes.data || [],
+      extensions: extensionsWithRingers,
       callLogs: logsRes.data || [],
       voicemails: voicemailsRes.data || [],
     });
-    
-    const errors = [hoursRes.error, ivrRes.error, audioRes.error, extRes.error, logsRes.error, voicemailsRes.error].filter(Boolean);
+
+    const errors = [hoursRes.error, ivrRes.error, audioRes.error, extRes.error, ringersRes.error, logsRes.error, voicemailsRes.error].filter(Boolean);
     if (errors.length > 0) {
       throw new Error(errors.map(e => e.message).join(', '));
     }
@@ -85,14 +92,22 @@ export function usePbxManager(user) {
       }
     },
     audio_files: {
-      add: async (file) => {
-        const filePath = `${user.id}/${Date.now()}-${file.name}`;
+      add: async (file, displayName) => {
+        const safeName = (displayName || file.name || `audio-${Date.now()}`).replace(/[^A-Za-z0-9._-]/g, '_');
+        const filePath = `${user.id}/${Date.now()}-${safeName}`;
         const { error: uploadError } = await supabase.storage.from('pbx_audio').upload(filePath, file);
         if (uploadError) throw uploadError;
         const { data: { publicUrl } } = supabase.storage.from('pbx_audio').getPublicUrl(filePath);
-        const { data, error } = await supabase.from('pbx_audio_files').insert({ user_id: user.id, name: file.name, file_url: publicUrl }).select().single();
+        const { data, error } = await supabase.from('pbx_audio_files').insert({ user_id: user.id, name: displayName || file.name, file_url: publicUrl }).select().single();
         if (error) throw error;
         setPbxData(d => ({ ...d, audioFiles: [...d.audioFiles, data] }));
+        return data;
+      },
+      rename: async (id, name) => {
+        const { data, error } = await supabase.from('pbx_audio_files').update({ name }).eq('id', id).eq('user_id', user.id).select().single();
+        if (error) throw error;
+        setPbxData(d => ({ ...d, audioFiles: d.audioFiles.map(f => f.id === id ? { ...f, ...data } : f) }));
+        return data;
       },
       delete: async (id) => {
         const fileToDelete = pbxData.audioFiles.find(f => f.id === id);
@@ -124,20 +139,75 @@ export function usePbxManager(user) {
     },
     extensions: {
       add: async (ext) => {
-        const { data, error } = await supabase.from('pbx_extensions').insert({ ...ext, user_id: user.id }).select().single();
+        const { ringers: _r, ...payload } = ext || {};
+        const { data, error } = await supabase.from('pbx_extensions').insert({ ...payload, user_id: user.id }).select().single();
         if (error) throw error;
-        setPbxData(d => ({ ...d, extensions: [...d.extensions, data] }));
+        setPbxData(d => ({ ...d, extensions: [...d.extensions, { ...data, ringers: [] }] }));
+        return data;
       },
       update: async (ext) => {
-        const { data, error } = await supabase.from('pbx_extensions').update(ext).eq('id', ext.id).select().single();
+        const { ringers: _r, ...payload } = ext || {};
+        const { data, error } = await supabase.from('pbx_extensions').update(payload).eq('id', ext.id).select().single();
         if (error) throw error;
-        setPbxData(d => ({ ...d, extensions: d.extensions.map(e => e.id === ext.id ? data : e) }));
+        setPbxData(d => ({
+          ...d,
+          extensions: d.extensions.map(e => e.id === ext.id ? { ...e, ...data } : e),
+        }));
+        return data;
       },
       delete: async (id) => {
         const { error } = await supabase.from('pbx_extensions').delete().eq('id', id);
         if (error) throw error;
         setPbxData(d => ({ ...d, extensions: d.extensions.filter(e => e.id !== id) }));
-      }
+      },
+      ringers: {
+        add: async (extensionId, ringer) => {
+          const { data, error } = await supabase
+            .from('pbx_extension_ringers')
+            .insert({ ...ringer, extension_id: extensionId, user_id: user.id })
+            .select()
+            .single();
+          if (error) throw error;
+          setPbxData(d => ({
+            ...d,
+            extensions: d.extensions.map(e =>
+              e.id === extensionId ? { ...e, ringers: [...(e.ringers || []), data] } : e
+            ),
+          }));
+          return data;
+        },
+        update: async (ringer) => {
+          const { id, extension_id, user_id: _u, ...patch } = ringer;
+          const { data, error } = await supabase
+            .from('pbx_extension_ringers')
+            .update(patch)
+            .eq('id', id)
+            .select()
+            .single();
+          if (error) throw error;
+          setPbxData(d => ({
+            ...d,
+            extensions: d.extensions.map(e =>
+              e.id === (extension_id || data.extension_id)
+                ? { ...e, ringers: (e.ringers || []).map(r => r.id === id ? data : r) }
+                : e
+            ),
+          }));
+          return data;
+        },
+        delete: async (extensionId, ringerId) => {
+          const { error } = await supabase.from('pbx_extension_ringers').delete().eq('id', ringerId);
+          if (error) throw error;
+          setPbxData(d => ({
+            ...d,
+            extensions: d.extensions.map(e =>
+              e.id === extensionId
+                ? { ...e, ringers: (e.ringers || []).filter(r => r.id !== ringerId) }
+                : e
+            ),
+          }));
+        },
+      },
     },
     call_logs: {
       add: async (log) => {

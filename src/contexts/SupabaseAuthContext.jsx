@@ -16,6 +16,34 @@ export const AuthProvider = ({ children }) => {
     setSession(session);
     setUser(session?.user ?? null);
     setLoading(false);
+
+    // Ensure a user_profiles row exists for users who signed up while
+    // email confirmation was required (profile insert was deferred).
+    const u = session?.user;
+    if (u?.id) {
+      try {
+        const { data: existing } = await supabase
+          .from('user_profiles')
+          .select('user_id')
+          .eq('user_id', u.id)
+          .maybeSingle();
+        if (!existing) {
+          const md = u.user_metadata || {};
+          if (md.store_name || md.full_name) {
+            await supabase.from('user_profiles').insert({
+              user_id: u.id,
+              full_name: md.full_name || null,
+              phone: md.phone || null,
+              store_name: md.store_name || null,
+              business_type: md.business_type || 'retail',
+              approval_status: 'pending',
+            });
+          }
+        }
+      } catch (_) {
+        // Non-fatal; user can still sign in.
+      }
+    }
   }, []);
 
   const applyKioskCredentials = useCallback(async (credentials, { persist = false, clearInstaller = false } = {}) => {
@@ -102,7 +130,7 @@ export const AuthProvider = ({ children }) => {
   }, [applyKioskCredentials, handleSession]);
 
   const signUp = useCallback(async (email, password, options) => {
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options,
@@ -116,7 +144,7 @@ export const AuthProvider = ({ children }) => {
       });
     }
 
-    return { error };
+    return { data, error };
   }, [toast]);
 
   const signIn = useCallback(async (email, password) => {
@@ -126,11 +154,15 @@ export const AuthProvider = ({ children }) => {
     });
 
     if (error) {
-      toast({
-        variant: "destructive",
-        title: "Sign in Failed",
-        description: error.message || "Something went wrong",
-      });
+      const msg = (error.message || '').toLowerCase();
+      const isBanned = msg.includes('banned') || msg.includes('disabled') || error.code === 'user_banned';
+      if (!isBanned) {
+        toast({
+          variant: "destructive",
+          title: "Sign in Failed",
+          description: error.message || "Something went wrong",
+        });
+      }
     }
 
     return { error };
@@ -150,6 +182,23 @@ export const AuthProvider = ({ children }) => {
     return { error };
   }, [toast]);
 
+  const resetPassword = useCallback(async (email) => {
+    const redirectTo = typeof window !== 'undefined'
+      ? `${window.location.origin}/reset-password`
+      : undefined;
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+
+    if (error) {
+      toast({
+        variant: "destructive",
+        title: "Reset Failed",
+        description: error.message || "Couldn't send the reset email.",
+      });
+    }
+
+    return { error };
+  }, [toast]);
+
   const value = useMemo(() => ({
     user,
     session,
@@ -157,7 +206,8 @@ export const AuthProvider = ({ children }) => {
     signUp,
     signIn,
     signOut,
-  }), [user, session, loading, signUp, signIn, signOut]);
+    resetPassword,
+  }), [user, session, loading, signUp, signIn, signOut, resetPassword]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

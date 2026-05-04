@@ -1,5 +1,5 @@
 import React from 'react';
-import Auth from '@/components/pos/Auth';
+import SignupWizard from '@/components/auth/SignupWizard.jsx';
 import { Helmet } from 'react-helmet-async';
 
 const SignupPage = () => {
@@ -7,9 +7,9 @@ const SignupPage = () => {
     <>
       <Helmet>
         <title>Sign Up - StorePilot</title>
-        <meta name="description" content="Create an account and start your 30-day free trial with StorePilot." />
+        <meta name="description" content="Create your StorePilot account." />
       </Helmet>
-      <Auth mode="signup" />
+      <SignupWizard />
     </>
   );
 };

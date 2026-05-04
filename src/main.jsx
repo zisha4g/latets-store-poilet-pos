@@ -9,6 +9,14 @@ import PricingPage from '@/pages/PricingPage.jsx';
 import DemoPage from '@/pages/DemoPage.jsx';
 import LoginPage from '@/pages/LoginPage.jsx';
 import SignupPage from '@/pages/SignupPage.jsx';
+import ResetPasswordPage from '@/pages/ResetPasswordPage.jsx';
+import WelcomePage from '@/pages/WelcomePage.jsx';
+import PendingApprovalPage from '@/pages/PendingApprovalPage.jsx';
+import AdminLayout from '@/pages/admin/AdminLayout.jsx';
+import AdminUsersPage from '@/pages/admin/AdminUsersPage.jsx';
+import AdminPhoneNumbersPage from '@/pages/admin/AdminPhoneNumbersPage.jsx';
+import AdminVoicePage from '@/pages/admin/AdminVoicePage.jsx';
+import AdminAuditLogPage from '@/pages/admin/AdminAuditLogPage.jsx';
 import AccountingApp from '@/AccountingApp.jsx';
 import DashboardPage from '@/pages/app/DashboardPage.jsx';
 import PosPage from '@/pages/app/PosPage.jsx';
@@ -91,6 +99,29 @@ const webRoutes = [
     element: <SignupPage />,
   },
   {
+    path: "/reset-password",
+    element: <ResetPasswordPage />,
+  },
+  {
+    path: "/welcome",
+    element: <WelcomePage />,
+  },
+  {
+    path: "/pending-approval",
+    element: <PendingApprovalPage />,
+  },
+  {
+    path: "/admin",
+    element: <AdminLayout />,
+    children: [
+      { index: true, element: <Navigate to="users" replace /> },
+      { path: "users", element: <AdminUsersPage /> },
+      { path: "phone-numbers", element: <AdminPhoneNumbersPage /> },
+      { path: "voice-ordering", element: <AdminVoicePage /> },
+      { path: "audit-log", element: <AdminAuditLogPage /> },
+    ],
+  },
+  {
     path: "/stripe/callback",
     element: <StripeCallbackPage />,
   },
@@ -116,6 +147,10 @@ const webRoutes = [
   },
   {
     path: "/pbx",
+    element: <PbxStandalonePage />,
+  },
+  {
+    path: "/pbx/:section",
     element: <PbxStandalonePage />,
   },
   {

@@ -1265,6 +1265,11 @@ const FlowListEditor = ({ graphFlow, syncGraph, flowPublished, flowVersion, save
           {adminMode && (
             <span className="text-xs rounded-full px-2.5 py-0.5 bg-purple-100 text-purple-700 font-medium">Admin</span>
           )}
+          <a
+            href="/pbx"
+            className="text-xs text-primary hover:underline ml-auto"
+            title="Manage your phone numbers and call routing in the PBX dashboard"
+          >Manage numbers & routing in PBX →</a>
         </div>
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-3">
@@ -1369,7 +1374,7 @@ const FlowListEditor = ({ graphFlow, syncGraph, flowPublished, flowVersion, save
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
-const VoiceOrderingSettings = () => {
+const VoiceOrderingSettings = ({ hideAdminMode = false } = {}) => {
   const { user, loading: authLoading } = useAuth();
 
   const [loadingUserConfig, setLoadingUserConfig] = useState(true);
@@ -1663,7 +1668,7 @@ const VoiceOrderingSettings = () => {
     if (authLoading) return; // wait until Supabase has restored session from storage
     if (!user?.id) return;   // not logged in — no point calling functions
     loadUserConfig();
-    loadAdminContext();
+    if (!hideAdminMode) loadAdminContext();
     // Only re-run when the actual user id changes, not on every token refresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, user?.id]);

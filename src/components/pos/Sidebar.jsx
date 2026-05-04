@@ -21,9 +21,11 @@ import {
   Menu,
   X,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
+  ShieldCheck
 } from 'lucide-react';
 import { useAuth } from '@/contexts/SupabaseAuthContext.jsx';
+import { useIsAdmin } from '@/hooks/useIsAdmin.js';
 import { Button } from '@/components/ui/button';
 import { useResponsive } from '@/lib/responsive';
 import { prefetchRoute } from '@/lib/prefetch';
@@ -43,6 +45,7 @@ const navItems = [
 
 const Sidebar = ({ isOnline, settings, isDemo }) => {
   const { user, signOut } = useAuth();
+  const { isAdmin } = useIsAdmin(isDemo ? null : user);
   const location = useLocation();
   const navigate = useNavigate();
   const { isMobile } = useResponsive();
@@ -121,6 +124,16 @@ const Sidebar = ({ isOnline, settings, isDemo }) => {
         })}
       </nav>
       <div className="mt-auto pt-4 space-y-2">
+        {isAdmin && (
+          <NavLink
+            to="/admin"
+            className={getNavLinkClass('/admin')}
+            onClick={handleNavClick}
+          >
+            <ShieldCheck className="w-5 h-5 mr-3" />
+            Admin
+          </NavLink>
+        )}
         <NavLink 
           to="/app/settings" 
           className={getNavLinkClass('/app/settings')}
@@ -151,7 +164,7 @@ const Sidebar = ({ isOnline, settings, isDemo }) => {
             <User className="w-4 h-4 md:w-5 md:h-5" />
           </div>
           <div className="flex-grow min-w-0">
-            <p className="text-xs md:text-sm font-semibold truncate">{user?.email || 'Demo User'}</p>
+            <p className="text-xs md:text-sm font-semibold truncate">{isDemo ? 'Demo User' : (user?.email || 'Demo User')}</p>
           </div>
           {!isDemo && (
             <Button variant="ghost" size="icon" onClick={handleSignOut} title="Sign Out" className="flex-shrink-0">

@@ -11,10 +11,10 @@ const tables = [
   'deliveries',
   'phone_call_sessions',
   'appointments', 'tasks',
-  'pbx_business_hours', 'pbx_ivr_menus', 'pbx_audio_files', 'pbx_extensions', 'pbx_call_logs', 'pbx_voicemails'
+  'pbx_business_hours', 'pbx_ivr_menus', 'pbx_audio_files', 'pbx_extensions', 'pbx_extension_ringers', 'pbx_call_logs', 'pbx_voicemails'
 ];
 
-const pbxTables = ['pbx_business_hours', 'pbx_ivr_menus', 'pbx_audio_files', 'pbx_extensions', 'pbx_call_logs', 'pbx_voicemails'];
+const pbxTables = ['pbx_business_hours', 'pbx_ivr_menus', 'pbx_audio_files', 'pbx_extensions', 'pbx_extension_ringers', 'pbx_call_logs', 'pbx_voicemails'];
 
 const showDemoToast = () => {
   toast({
@@ -141,7 +141,12 @@ export function useDataManagement(user, isDemo = false) {
           businessHours: fetchedData.pbx_business_hours || [],
           ivrMenus: fetchedData.pbx_ivr_menus || [],
           audioFiles: fetchedData.pbx_audio_files || [],
-          extensions: fetchedData.pbx_extensions || [],
+          extensions: ((fetchedData.pbx_extensions) || []).map((e) => ({
+            ...e,
+            ringers: ((fetchedData.pbx_extension_ringers) || [])
+              .filter((r) => r.extension_id === e.id)
+              .sort((a, b) => (a.priority || 0) - (b.priority || 0)),
+          })),
           callLogs: (fetchedData.pbx_call_logs || []).sort((a,b) => new Date(b.created_at) - new Date(a.created_at)),
           voicemails: (fetchedData.pbx_voicemails || []).sort((a,b) => new Date(b.created_at) - new Date(a.created_at)),
         },
@@ -229,8 +234,9 @@ export function useDataManagement(user, isDemo = false) {
         }, {});
         
         demoHandlers.pbx = pbxTables.reduce((acc, table) => {
-            const tableName = table.replace('pbx_', '');
-            const key = tableName.charAt(0).toLowerCase() + tableName.slice(1).replace(/_([a-z])/g, g => g[1].toUpperCase());
+            // Keep snake_case keys (e.g. business_hours) to match how PBXView
+            // and other consumers access them: handlers.pbx.business_hours.upsert
+            const key = table.replace('pbx_', '');
             acc[key] = createDemoHandlers(table);
             return acc;
         }, {});
@@ -359,7 +365,69 @@ export function useDataManagement(user, isDemo = false) {
                 await createHandlers('pbx_audio_files').delete(id);
             }
         },
-        extensions: { ...createHandlers('pbx_extensions') },
+        extensions: {
+          ...createHandlers('pbx_extensions'),
+          add: async (ext) => {
+            if (isDemo) { showDemoToast(); return null; }
+            const { ringers: _r, ...payload } = ext || {};
+            const { data: row, error } = await supabase
+              .from('pbx_extensions')
+              .insert({ ...payload, user_id: user.id })
+              .select()
+              .single();
+            if (error) throw error;
+            silentRefresh();
+            return row;
+          },
+          update: async (ext) => {
+            if (isDemo) { showDemoToast(); return null; }
+            const { ringers: _r, ...payload } = ext || {};
+            const { data: row, error } = await supabase
+              .from('pbx_extensions')
+              .update(payload)
+              .eq('id', ext.id)
+              .select()
+              .single();
+            if (error) throw error;
+            silentRefresh();
+            return row;
+          },
+          ringers: {
+            add: async (extensionId, ringer) => {
+              if (isDemo) { showDemoToast(); return null; }
+              const { data: row, error } = await supabase
+                .from('pbx_extension_ringers')
+                .insert({ ...ringer, extension_id: extensionId, user_id: user.id })
+                .select()
+                .single();
+              if (error) throw error;
+              silentRefresh();
+              return row;
+            },
+            update: async (ringer) => {
+              if (isDemo) { showDemoToast(); return null; }
+              const { id, user_id: _u, ...patch } = ringer;
+              const { data: row, error } = await supabase
+                .from('pbx_extension_ringers')
+                .update(patch)
+                .eq('id', id)
+                .select()
+                .single();
+              if (error) throw error;
+              silentRefresh();
+              return row;
+            },
+            delete: async (ringerId) => {
+              if (isDemo) { showDemoToast(); return null; }
+              const { error } = await supabase
+                .from('pbx_extension_ringers')
+                .delete()
+                .eq('id', ringerId);
+              if (error) throw error;
+              silentRefresh();
+            },
+          },
+        },
         call_logs: { ...createHandlers('pbx_call_logs') },
         voicemails: { ...createHandlers('pbx_voicemails') },
       }

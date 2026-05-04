@@ -6,6 +6,7 @@ import { useDataManagement } from '@/hooks/useDataManagement';
 import { Toaster } from '@/components/ui/toaster';
 import PbxConsole from '@/components/pos/pbx/PbxConsole';
 import CallModal from '@/components/pos/pbx/CallModal';
+import IncomingCallPopup from '@/components/pos/pbx/IncomingCallPopup';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
@@ -92,6 +93,7 @@ const PbxStandalonePage = () => {
           />
         </div>
         <Toaster />
+        <IncomingCallPopup />
         <CallModal
           isOpen={!!activeCall}
           onClose={() => setActiveCall(null)}

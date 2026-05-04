@@ -1,0 +1,10 @@
+project_id = "tjjueyedvxhkvinxsszy"
+
+# Public webhook endpoints (called by SignalWire / Twilio / phones, etc.) must
+# NOT enforce Supabase JWT verification — those providers don't carry a JWT.
+# If you remove this, calls will silently 401 before any of our code runs.
+[functions.voice-webhook]
+verify_jwt = false
+
+[functions.provision]
+verify_jwt = false

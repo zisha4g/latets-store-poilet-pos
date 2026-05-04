@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { motion } from 'framer-motion';
 import { Helmet } from 'react-helmet-async';
-import { ShoppingCart, Package, Users, BarChart3, Scale, Phone, Video, Eye, ArrowRight, Rocket, Store } from 'lucide-react';
+import { ShoppingCart, Package, Users, BarChart3, Scale, Phone, Eye, ArrowRight, Rocket, Store } from 'lucide-react';
+
+const LiveDemoPlayer = lazy(() => import('@/components/landing/LiveDemoPlayer.jsx'));
 
 const FeatureCard = ({ icon: Icon, title, description }) => (
   <motion.div
@@ -53,29 +55,43 @@ const LandingPage = () => {
       </header>
 
       <main className="pt-20">
-        <section className="container mx-auto px-6 py-24 text-center">
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
-            <h1 className="text-5xl md:text-7xl font-extrabold mb-4">
-              The <span className="gradient-text">All-in-One</span> Platform
-              <br />
-              to Run Your Store
+        <section className="container mx-auto px-6 pt-6 pb-10 md:pt-8 md:pb-14">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+            className="text-center max-w-4xl mx-auto mb-6 md:mb-8"
+          >
+            <h1 className="text-3xl md:text-5xl font-extrabold mb-3">
+              The <span className="gradient-text">All-in-One</span> Platform to Run Your Store
             </h1>
-            <p className="text-xl text-muted-foreground max-w-3xl mx-auto mb-8">
-              From point of sale to inventory management, accounting, and even a built-in phone system—StorePilot gives you everything you need to thrive.
+            <p className="text-base md:text-lg text-muted-foreground max-w-2xl mx-auto mb-5">
+              POS, inventory, accounting, and a built-in phone system — watch it run live below.
             </p>
-            <div className="flex justify-center space-x-4">
-              <Button asChild size="lg" className="text-lg">
+            <div className="flex flex-wrap justify-center gap-3">
+              <Button asChild size="lg">
                 <Link to="/signup">Start 30-Day Free Trial <ArrowRight className="w-5 h-5 ml-2" /></Link>
               </Button>
-              <Button asChild variant="secondary" size="lg" className="text-lg">
+              <Button asChild variant="secondary" size="lg">
                 <Link to="/demo">Explore Demo Store <Eye className="w-5 h-5 ml-2" /></Link>
               </Button>
             </div>
-             <div className="mt-8">
-                <Button asChild variant="link" className="text-lg">
-                  <a href="#demo-video">Watch Demo Video <Video className="w-5 h-5 ml-2" /></a>
-                </Button>
-              </div>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.15 }}
+            className="relative"
+            style={{ minHeight: 'calc(100vh - 96px)' }}
+          >
+            <div className="sticky top-24 flex items-center justify-center">
+              <Suspense fallback={
+                <div className="w-full max-w-7xl mx-auto rounded-2xl bg-card border border-border animate-pulse" style={{ aspectRatio: '1440 / 860' }} />
+              }>
+                <LiveDemoPlayer />
+              </Suspense>
+            </div>
           </motion.div>
         </section>
 
@@ -94,16 +110,6 @@ const LandingPage = () => {
               <FeatureCard icon={BarChart3} title="Powerful Reporting" description="Make data-driven decisions with comprehensive reports on sales, products, and customer trends." />
             </div>
           </div>
-        </section>
-
-        <section id="demo-video" className="container mx-auto px-6 py-24">
-            <div className="text-center mb-12">
-                <h2 className="text-4xl font-bold">See StorePilot in Action</h2>
-                <p className="text-lg text-muted-foreground mt-2">Watch a quick overview of our most powerful features.</p>
-            </div>
-            <div className="aspect-video bg-card border border-border rounded-2xl shadow-xl max-w-4xl mx-auto flex items-center justify-center">
-                 <img className="w-full h-full object-cover rounded-2xl" alt="Video demonstration of the StorePilot application in use." src="https://images.unsplash.com/photo-1486476477591-5929f13cf265" />
-            </div>
         </section>
 
       </main>

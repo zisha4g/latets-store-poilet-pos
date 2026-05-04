@@ -19,7 +19,99 @@ type ConfigAction =
   | "rename_flow"
   | "delete_flow"
   | "set_primary"
-  | "set_active";
+  | "set_active"
+  | "list_my_phone_numbers"
+  | "update_phone_routing"
+  | "update_phone_label"
+  | "set_phone_active";
+
+// Recursively validate a routing tree node. Returns array of error strings.
+// Tree shape:
+//   { type: "flow", flowId: string|null }
+//   { type: "forward", number: string, callerIdPassthrough?: boolean }
+//   { type: "play", message: string, voice?: string }
+//   { type: "voicemail", greeting?: string, notifySms?: string, notifyEmail?: string }
+//   { type: "business_hours", open: <node>, closed: <node> }
+//   { type: "ivr_menu", prompt: string, options: { "1": <node>, "2": <node>, ... } }
+const ALLOWED_ROUTING_TYPES = new Set([
+  "flow",
+  "forward",
+  "play",
+  "voicemail",
+  "business_hours",
+  "ivr_menu",
+]);
+
+const validateRoutingNode = (
+  node: unknown,
+  path = "routing",
+  depth = 0,
+  allowedFlowIds?: Set<string>,
+): string[] => {
+  const errors: string[] = [];
+  if (depth > 10) {
+    errors.push(`${path}: routing tree too deep (max 10 levels).`);
+    return errors;
+  }
+  if (!node || typeof node !== "object") {
+    errors.push(`${path}: must be an object.`);
+    return errors;
+  }
+  const n = node as Record<string, unknown>;
+  const type = String(n.type ?? "");
+  if (!ALLOWED_ROUTING_TYPES.has(type)) {
+    errors.push(`${path}: unknown type "${type}".`);
+    return errors;
+  }
+  if (type === "flow") {
+    const flowId = n.flowId;
+    if (flowId !== null && typeof flowId !== "string") {
+      errors.push(`${path}.flowId: must be string or null.`);
+    } else if (typeof flowId === "string" && allowedFlowIds && !allowedFlowIds.has(flowId)) {
+      errors.push(`${path}.flowId: not one of your flows.`);
+    }
+  } else if (type === "forward") {
+    if (!String(n.number ?? "").trim()) errors.push(`${path}.number: required.`);
+  } else if (type === "play") {
+    if (!String(n.message ?? "").trim()) errors.push(`${path}.message: required.`);
+  } else if (type === "voicemail") {
+    // greeting optional
+  } else if (type === "business_hours") {
+    errors.push(...validateRoutingNode(n.open, `${path}.open`, depth + 1, allowedFlowIds));
+    errors.push(...validateRoutingNode(n.closed, `${path}.closed`, depth + 1, allowedFlowIds));
+  } else if (type === "ivr_menu") {
+    // Two valid shapes:
+    //  1) Reference: { type: 'ivr_menu', menuId: '<uuid>' } — IVR is built in PBX → IVR / Auto attendant
+    //  2) Inline   : { type: 'ivr_menu', prompt, options: { '1': <node>, ... } }
+    const menuId = n.menuId;
+    if (menuId !== undefined && menuId !== null) {
+      if (typeof menuId !== "string" || !menuId.trim()) {
+        errors.push(`${path}.menuId: must be a non-empty string.`);
+      }
+      // No further checks needed — the webhook hydrates from pbx_ivr_menus at
+      // call time and validates ownership there.
+      return errors;
+    }
+    if (!String(n.prompt ?? "").trim()) errors.push(`${path}.prompt: required (or set menuId to reference a saved IVR).`);
+    const options = n.options;
+    if (!options || typeof options !== "object") {
+      errors.push(`${path}.options: required object.`);
+    } else {
+      const keys = Object.keys(options as Record<string, unknown>);
+      if (!keys.length) errors.push(`${path}.options: at least one digit required.`);
+      keys.forEach((k) => {
+        if (!/^[0-9*#]$/.test(k)) errors.push(`${path}.options: invalid digit "${k}".`);
+        errors.push(...validateRoutingNode(
+          (options as Record<string, unknown>)[k],
+          `${path}.options[${k}]`,
+          depth + 1,
+          allowedFlowIds,
+        ));
+      });
+    }
+  }
+  return errors;
+};
 
 const validateGraphFlow = (flow: Record<string, unknown>) => {
   const errors: string[] = [];
@@ -139,6 +231,9 @@ Deno.serve(async (req) => {
     flowId?: string;
     name?: string;
     isActive?: boolean;
+    channelId?: string;
+    routing?: Record<string, unknown>;
+    label?: string;
   } | null;
 
   const action = body?.action;
@@ -389,6 +484,85 @@ Deno.serve(async (req) => {
       .eq("user_id", userId);
     if (error) return jsonResponse({ error: error.message }, 500);
     return jsonResponse({ ok: true, flowId: target.id });
+  }
+
+  // ─────────── Phone numbers: list mine ───────────
+  if (action === "list_my_phone_numbers") {
+    const { data, error } = await adminClient
+      .from("store_channels")
+      .select("id, inbound_phone_e164, label, voice_ordering_enabled, is_active, configured, routing, created_at")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: true });
+    if (error) return jsonResponse({ error: error.message }, 500);
+    return jsonResponse({ ok: true, channels: data ?? [] });
+  }
+
+  // ─────────── Phone numbers: update routing tree ───────────
+  if (action === "update_phone_routing") {
+    const channelId = String(body?.channelId ?? "");
+    if (!channelId) return jsonResponse({ error: "channelId is required" }, 400);
+    if (!body?.routing || typeof body.routing !== "object") {
+      return jsonResponse({ error: "routing object is required" }, 400);
+    }
+
+    // Verify ownership.
+    const { data: channel } = await adminClient
+      .from("store_channels")
+      .select("id, user_id")
+      .eq("id", channelId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (!channel) return jsonResponse({ error: "Phone number not found" }, 404);
+
+    // Load user's flow ids for validation.
+    const { data: flows } = await adminClient
+      .from("ivr_flow_configs")
+      .select("id")
+      .eq("user_id", userId);
+    const allowedFlowIds = new Set((flows ?? []).map((f: { id: string }) => f.id));
+
+    const errors = validateRoutingNode(body.routing, "routing", 0, allowedFlowIds);
+    if (errors.length) {
+      return jsonResponse({ error: errors[0], validationErrors: errors }, 400);
+    }
+
+    const { error } = await adminClient
+      .from("store_channels")
+      .update({ routing: body.routing, configured: true, updated_at: new Date().toISOString() })
+      .eq("id", channelId)
+      .eq("user_id", userId);
+    if (error) return jsonResponse({ error: error.message }, 500);
+    return jsonResponse({ ok: true });
+  }
+
+  // ─────────── Phone numbers: rename label ───────────
+  if (action === "update_phone_label") {
+    const channelId = String(body?.channelId ?? "");
+    const label = String(body?.label ?? "").trim();
+    if (!channelId || !label) {
+      return jsonResponse({ error: "channelId and label are required" }, 400);
+    }
+    const { error } = await adminClient
+      .from("store_channels")
+      .update({ label, updated_at: new Date().toISOString() })
+      .eq("id", channelId)
+      .eq("user_id", userId);
+    if (error) return jsonResponse({ error: error.message }, 500);
+    return jsonResponse({ ok: true });
+  }
+
+  // ─────────── Phone numbers: toggle active on/off ───────────
+  if (action === "set_phone_active") {
+    const channelId = String(body?.channelId ?? "");
+    const isActive = Boolean(body?.isActive);
+    if (!channelId) return jsonResponse({ error: "channelId is required" }, 400);
+    const { error } = await adminClient
+      .from("store_channels")
+      .update({ is_active: isActive, updated_at: new Date().toISOString() })
+      .eq("id", channelId)
+      .eq("user_id", userId);
+    if (error) return jsonResponse({ error: error.message }, 500);
+    return jsonResponse({ ok: true });
   }
 
   return jsonResponse({ error: "Unsupported action" }, 400);

@@ -29,7 +29,7 @@ const SettingsPage = () => {
             case 'payment-gateway':
                 return <PaymentGatewaySettings />;
             case 'voice-ordering':
-                return <VoiceOrderingSettings />;
+                return <VoiceOrderingSettings hideAdminMode />;
             case 'financials':
                 return <SettingsFinancials taxes={taxes} serviceCharges={serviceCharges} handlers={handlers} />;
             case 'modules':

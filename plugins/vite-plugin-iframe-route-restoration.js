@@ -11,7 +11,15 @@ export default function iframeRouteRestorationPlugin() {
       ];
 
         // Check to see if the page is in an iframe
-        if (window.self !== window.top) {
+        if (window.self !== window.top) (function () {
+          // Bail out entirely for our own embedded demo: it must stay on /demo
+          // and never be auto-restored to a previously-visited authenticated route.
+          if (location.search.includes('embedded=1') || location.pathname.startsWith('/demo')) {
+            // Clear any stale saved route so it cannot hijack a future demo load
+            try { sessionStorage.removeItem('horizons-iframe-saved-route'); } catch {}
+            return;
+          }
+
           const STORAGE_KEY = 'horizons-iframe-saved-route';
 
           const getCurrentRoute = () => location.pathname + location.search + location.hash;
@@ -109,7 +117,7 @@ export default function iframeRouteRestorationPlugin() {
           });
 
           restore();
-        }
+        })();
       `;
 
       return [

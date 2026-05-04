@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+
 import { motion } from 'framer-motion';
 import {
   LayoutDashboard, History, Voicemail, Clock, Music, ListTree, PhoneForwarded,
@@ -18,6 +20,7 @@ import ExtensionsManager from '@/components/pos/pbx/ExtensionsManager';
 import PbxDashboard from '@/components/pos/pbx/PbxDashboard';
 import CallLogsView from '@/components/pos/pbx/CallLogsView';
 import VoicemailsView from '@/components/pos/pbx/VoicemailsView';
+import PhoneNumbersSettings from '@/components/pos/settings/PhoneNumbersSettings';
 
 // Section registry. `component` = live UI; `planned` = list of features
 // rendered as a roadmap card so nothing is forgotten before we build it.
@@ -35,8 +38,7 @@ const SECTION_GROUPS = [
   {
     label: 'Numbers & Trunks',
     items: [
-      { id: 'numbers', name: 'Phone numbers', icon: Hash, status: 'planned', phase: 1,
-        planned: ['Buy / port DIDs via SignalWire', 'Map each DID to a flow', 'Outbound caller ID per DID', 'E911 address per number', 'SIP trunk failover'] },
+      { id: 'numbers', name: 'Phone numbers', icon: Hash, status: 'live' },
       { id: 'locations', name: 'Locations', icon: Building2, status: 'planned', phase: 2,
         planned: ['Per-store location config', 'Time zone & holiday calendar per location', 'Local outbound caller ID'] },
     ],
@@ -156,11 +158,29 @@ const PlannedSection = ({ item }) => (
   </Card>
 );
 
-const PbxConsole = ({ pbxData, handlers, onSimulateCall, onReturnToPos }) => {
-  const [activeId, setActiveId] = useState('dashboard');
+const PbxConsole = ({ pbxData, handlers, onSimulateCall, onReturnToPos, embedded = false }) => {
+  const allItems = SECTION_GROUPS.flatMap((g) => g.items);
+  const validIds = new Set(allItems.map((i) => i.id));
+  const params = useParams();
+  const navigate = useNavigate();
+  const routeSection = embedded ? null : params?.section;
+  const [localActive, setLocalActive] = useState('dashboard');
+  const activeId = embedded
+    ? localActive
+    : (routeSection && validIds.has(routeSection) ? routeSection : 'dashboard');
+  const setActiveId = (id) => {
+    if (embedded) { setLocalActive(id); return; }
+    if (id === 'dashboard') navigate('/pbx');
+    else navigate(`/pbx/${id}`);
+  };
   const { businessHours, ivrMenus, audioFiles, extensions, callLogs, voicemails } = pbxData;
 
-  const allItems = SECTION_GROUPS.flatMap((g) => g.items);
+  // If a stale/unknown section is in the URL, normalise it.
+  useEffect(() => {
+    if (embedded) return;
+    if (routeSection && !validIds.has(routeSection)) navigate('/pbx', { replace: true });
+  }, [routeSection]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const active = allItems.find((i) => i.id === activeId) || allItems[0];
 
   const renderActive = () => {
@@ -176,11 +196,13 @@ const PbxConsole = ({ pbxData, handlers, onSimulateCall, onReturnToPos }) => {
       case 'greetings':
         return <GreetingsManager audioFiles={audioFiles} handlers={handlers.pbx.audio_files} />;
       case 'ivr':
-        return <IVRManager audioFiles={audioFiles} extensions={extensions} handlers={handlers.pbx.ivr_menus} />;
+        return <IVRManager ivrMenus={ivrMenus} audioFiles={audioFiles} extensions={extensions} handlers={handlers.pbx.ivr_menus} audioHandlers={handlers.pbx.audio_files} />;
       case 'extensions':
         return <ExtensionsManager extensions={extensions} handlers={handlers.pbx.extensions} />;
       case 'devices':
         return <DevicesManager extensions={extensions} />;
+      case 'numbers':
+        return <PhoneNumbersSettings hideAdminMode />;
       default:
         return <PlannedSection item={active} />;
     }

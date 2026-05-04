@@ -10,20 +10,64 @@ import SettingsView from '@/components/pos/SettingsView.jsx';
 import InvoicesView from '@/components/pos/InvoicesView.jsx';
 import PurchasingView from '@/components/pos/PurchasingView.jsx';
 import PBXView from '@/components/pos/PBXView.jsx';
+import PbxConsole from '@/components/pos/pbx/PbxConsole.jsx';
 import CallModal from '@/components/pos/pbx/CallModal.jsx';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus.js';
 import { useAuth } from '@/contexts/SupabaseAuthContext.jsx';
 import { useHotkeys } from '@/hooks/use-hotkeys.js';
 import { useDataManagement } from '@/hooks/useDataManagement.js';
 import { toast } from '@/components/ui/use-toast.js';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { applyTheme } from '@/lib/themes.js';
+
+const VALID_TABS = ['pos', 'inventory', 'customers', 'invoices', 'purchasing', 'reports', 'pbx', 'settings'];
 
 function App({ isDemo = false }) {
   const { user, loading } = useAuth();
-  const [activeTab, setActiveTab] = useState('inventory');
+  const [searchParams] = useSearchParams();
+  const initialTab = (() => {
+    const t = searchParams.get('tab');
+    return t && VALID_TABS.includes(t) ? t : 'inventory';
+  })();
+  const [activeTab, setActiveTab] = useState(initialTab);
   const isOnline = useOnlineStatus();
   const navigate = useNavigate();
+
+  // In demo mode, follow ?tab= changes (LiveDemoPlayer drives scenes via URL).
+  useEffect(() => {
+    if (!isDemo) return;
+    const t = searchParams.get('tab');
+    if (t && VALID_TABS.includes(t) && t !== activeTab) {
+      setActiveTab(t);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDemo, searchParams]);
+
+  // In demo mode, also accept postMessage from parent (LiveDemoPlayer)
+  // so scenes can switch tabs without remounting the iframe.
+  useEffect(() => {
+    if (!isDemo) return;
+    const onMessage = (event) => {
+      const data = event.data;
+      if (!data || typeof data !== 'object') return;
+      if (data.type === 'storepilot:goto' && VALID_TABS.includes(data.tab)) {
+        setActiveTab(data.tab);
+      }
+    };
+    window.addEventListener('message', onMessage);
+    // Tell the parent we're ready — repeat a few times to win any listener-attach race.
+    const sendReady = () => {
+      try { window.parent?.postMessage({ type: 'storepilot:ready' }, '*'); } catch { /* noop */ }
+    };
+    sendReady();
+    const t1 = setTimeout(sendReady, 200);
+    const t2 = setTimeout(sendReady, 800);
+    const t3 = setTimeout(sendReady, 2000);
+    return () => {
+      window.removeEventListener('message', onMessage);
+      clearTimeout(t1); clearTimeout(t2); clearTimeout(t3);
+    };
+  }, [isDemo]);
   
   const { data, handlers, customersWithStats, refreshData } = useDataManagement(isDemo ? { id: 'demo-user' } : user, isDemo);
   const { products, customers, sales, categories, invoices, expenses, taxes, serviceCharges, vendors, saved_carts: savedCarts, settings, pbxData, chartOfAccounts, journalEntries, vendorBills } = data;
@@ -107,7 +151,10 @@ function App({ isDemo = false }) {
       case 'reports':
         return <ReportsView sales={sales} products={products} customers={customers} settings={settings} />;
       case 'pbx':
-        return settings.enablePBX?.value ? <PBXView pbxData={pbxData} handlers={handlers} onSimulateCall={() => handleStartCall('1-800-555-1234', 'inbound')} /> : null;
+        if (!settings.enablePBX?.value) return null;
+        return isDemo
+          ? <PbxConsole embedded pbxData={pbxData} handlers={handlers} onSimulateCall={() => handleStartCall('1-800-555-1234', 'inbound')} />
+          : <PBXView pbxData={pbxData} handlers={handlers} onSimulateCall={() => handleStartCall('1-800-555-1234', 'inbound')} />;
       case 'settings':
         return <SettingsView settings={settings} handlers={handlers} taxes={taxes} serviceCharges={serviceCharges} pbxData={pbxData} />;
       default:

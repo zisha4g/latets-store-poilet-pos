@@ -5,10 +5,13 @@ import { Helmet } from 'react-helmet-async';
 import { Toaster } from '@/components/ui/toaster';
 import Sidebar from '@/components/pos/Sidebar';
 import CallModal from '@/components/pos/pbx/CallModal';
+import IncomingCallPopup from '@/components/pos/pbx/IncomingCallPopup';
 import { VirtualKeyboard } from '@/components/ui/VirtualKeyboard';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { useDataManagement } from '@/hooks/useDataManagement';
 import { useCart } from '@/hooks/useCart.jsx';
+import { useApprovalStatus } from '@/hooks/useApprovalStatus.js';
+import PendingApprovalPage from '@/pages/PendingApprovalPage.jsx';
 import { toast } from '@/components/ui/use-toast';
 import { applyTheme } from '@/lib/themes';
 
@@ -18,6 +21,7 @@ const AppLayout = ({ isDemo = false }) => {
   const location = useLocation();
   const isOnline = useOnlineStatus();
   const { clearCart } = useCart();
+  const { loading: approvalLoading, status: approvalStatus, profile: approvalProfile, isAdmin } = useApprovalStatus(isDemo ? null : user);
   
   // Initialize data management with safe fallback for user
   const { data, handlers, loading: dataLoading, error: dataError, customersWithStats, refreshData } = useDataManagement(
@@ -136,6 +140,19 @@ const AppLayout = ({ isDemo = false }) => {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }
 
+  // Approval gate: block access only when admin explicitly marked the account
+  // as pending or rejected. 'missing' (no profile row) and 'approved' both pass.
+  // Platform admins always pass.
+  if (!isDemo && user && !approvalLoading && !isAdmin
+      && (approvalStatus === 'pending' || approvalStatus === 'rejected')) {
+    return (
+      <PendingApprovalPage
+        status={approvalStatus}
+        rejectionReason={approvalProfile?.rejection_reason || ''}
+      />
+    );
+  }
+
   // Construct context with safety checks
   const outletContext = { 
     data: data || {}, 
@@ -162,6 +179,7 @@ const AppLayout = ({ isDemo = false }) => {
           </main>
         </div>
         <Toaster />
+        <IncomingCallPopup />
         <CallModal
           isOpen={!!activeCall}
           onClose={() => setActiveCall(null)}
