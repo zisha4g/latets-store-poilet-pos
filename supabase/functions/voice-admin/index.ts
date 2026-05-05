@@ -192,15 +192,40 @@ Deno.serve(async (req: Request) => {
 
   if (action === "approve_user") {
     if (!targetUserId) return badRequest("targetUserId is required");
-    const { error } = await adminClient
+    const { data: existing } = await adminClient
       .from("user_profiles")
-      .update({
-        approval_status: "approved",
-        rejection_reason: null,
-        reviewed_by: userData.user.id,
-        reviewed_at: new Date().toISOString(),
-      })
-      .eq("user_id", targetUserId);
+      .select("id")
+      .eq("user_id", targetUserId)
+      .maybeSingle();
+    let error;
+    if (existing) {
+      ({ error } = await adminClient
+        .from("user_profiles")
+        .update({
+          approval_status: "approved",
+          rejection_reason: null,
+          reviewed_by: userData.user.id,
+          reviewed_at: new Date().toISOString(),
+        })
+        .eq("user_id", targetUserId));
+    } else {
+      const { data: targetAuth } = await adminClient.auth.admin.getUserById(targetUserId);
+      const md = (targetAuth?.user?.user_metadata ?? {}) as Record<string, unknown>;
+      ({ error } = await adminClient
+        .from("user_profiles")
+        .insert({
+          id: crypto.randomUUID(),
+          user_id: targetUserId,
+          email: targetAuth?.user?.email ?? null,
+          full_name: (md.full_name as string) ?? null,
+          phone: (md.phone as string) ?? null,
+          store_name: (md.store_name as string) ?? null,
+          business_type: (md.business_type as string) ?? "retail",
+          approval_status: "approved",
+          reviewed_by: userData.user.id,
+          reviewed_at: new Date().toISOString(),
+        }));
+    }
     if (error) {
       return new Response(JSON.stringify({ error: error.message }), {
         status: 500,
@@ -221,15 +246,41 @@ Deno.serve(async (req: Request) => {
   if (action === "reject_user") {
     if (!targetUserId) return badRequest("targetUserId is required");
     const reason = String(body.rejectionReason ?? "").trim() || null;
-    const { error } = await adminClient
+    const { data: existing } = await adminClient
       .from("user_profiles")
-      .update({
-        approval_status: "rejected",
-        rejection_reason: reason,
-        reviewed_by: userData.user.id,
-        reviewed_at: new Date().toISOString(),
-      })
-      .eq("user_id", targetUserId);
+      .select("id")
+      .eq("user_id", targetUserId)
+      .maybeSingle();
+    let error;
+    if (existing) {
+      ({ error } = await adminClient
+        .from("user_profiles")
+        .update({
+          approval_status: "rejected",
+          rejection_reason: reason,
+          reviewed_by: userData.user.id,
+          reviewed_at: new Date().toISOString(),
+        })
+        .eq("user_id", targetUserId));
+    } else {
+      const { data: targetAuth } = await adminClient.auth.admin.getUserById(targetUserId);
+      const md = (targetAuth?.user?.user_metadata ?? {}) as Record<string, unknown>;
+      ({ error } = await adminClient
+        .from("user_profiles")
+        .insert({
+          id: crypto.randomUUID(),
+          user_id: targetUserId,
+          email: targetAuth?.user?.email ?? null,
+          full_name: (md.full_name as string) ?? null,
+          phone: (md.phone as string) ?? null,
+          store_name: (md.store_name as string) ?? null,
+          business_type: (md.business_type as string) ?? "retail",
+          approval_status: "rejected",
+          rejection_reason: reason,
+          reviewed_by: userData.user.id,
+          reviewed_at: new Date().toISOString(),
+        }));
+    }
     if (error) {
       return new Response(JSON.stringify({ error: error.message }), {
         status: 500,

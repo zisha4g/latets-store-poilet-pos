@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/SupabaseAuthContext.jsx';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { useSoftphone } from '@/hooks/useSoftphone';
+import { useSoftphone } from '@/contexts/SoftphoneContext';
 
 // Subscribe to pbx_ring_events for the current user. Whenever a `ring_start`
 // row arrives we pop a non-blocking notification card in the lower-right
@@ -45,9 +45,17 @@ const IncomingCallPopup = () => {
   // even if Supabase Realtime is blocked) surface it via the same popup.
   useEffect(() => {
     if (!incomingCall) return;
+    // SignalWire SDK shape: { details: { caller_id_number, caller_id_name, ... } }
+    // (legacy JsSIP shape supported as a fallback)
+    const details = incomingCall.details || {};
     const remoteIdentity = incomingCall.remote_identity || {};
-    const fromUri = remoteIdentity?.uri?.user || remoteIdentity?.uri?.toString?.() || '';
-    const display = remoteIdentity?.display_name || '';
+    const fromUri =
+      details.caller_id_number ||
+      details.from ||
+      remoteIdentity?.uri?.user ||
+      remoteIdentity?.uri?.toString?.() ||
+      '';
+    const display = details.caller_id_name || remoteIdentity?.display_name || '';
     setActive((prev) => prev || {
       sessionId: null,
       ext: '',
@@ -59,11 +67,22 @@ const IncomingCallPopup = () => {
     });
   }, [incomingCall]);
 
-  // Auto-dismiss when SIP session ends.
+  // Auto-dismiss when SIP session ends. Once a SIP call has been wired
+  // through this popup (either we created the popup from the SIP invite OR
+  // the SIP invite arrived after a Realtime ring_start) we consider the
+  // popup tied to that call's lifecycle.
+  const sawSipRef = useRef(false);
   useEffect(() => {
-    if (!activeCall && !incomingCall) {
-      // only clear sip-driven popups; realtime-driven popups have their own lifecycle
-      setActive((prev) => (prev?.sipDriven ? null : prev));
+    if (incomingCall || activeCall) sawSipRef.current = true;
+  }, [incomingCall, activeCall]);
+  useEffect(() => {
+    if (!activeCall && !incomingCall && sawSipRef.current) {
+      sawSipRef.current = false;
+      setActive(null);
+      if (dismissTimerRef.current) {
+        clearTimeout(dismissTimerRef.current);
+        dismissTimerRef.current = null;
+      }
     }
   }, [activeCall, incomingCall]);
 
@@ -133,7 +152,9 @@ const IncomingCallPopup = () => {
     };
   }, [userId]);
 
+  const pendingAnswerRef = useRef(false);
   const handleAnswerBrowser = () => {
+    console.log('[popup] answer clicked, incomingCall:', !!incomingCall, 'sipStatus:', sipStatus);
     if (incomingCall) {
       answer();
       return;
@@ -145,23 +166,39 @@ const IncomingCallPopup = () => {
       });
       return;
     }
-    toast({
-      title: 'No active ring',
-      description: 'The call may have already been answered elsewhere.',
-    });
+    // SIP INVITE may not have reached us yet. Queue the answer for ~5s.
+    pendingAnswerRef.current = true;
+    toast({ title: 'Connecting…', description: 'Picking up the call.' });
+    setTimeout(() => {
+      if (pendingAnswerRef.current) {
+        pendingAnswerRef.current = false;
+        toast({ title: 'No active ring', description: 'The call may have already been answered elsewhere.' });
+      }
+    }, 5000);
   };
+
+  // If a SIP INVITE arrives after the user already clicked Answer, pick it up.
+  useEffect(() => {
+    if (incomingCall && pendingAnswerRef.current) {
+      pendingAnswerRef.current = false;
+      answer();
+    }
+  }, [incomingCall, answer]);
 
   const handleHangup = () => {
     hangup();
+    pendingAnswerRef.current = false;
     setActive(null);
   };
 
   const handleAnswerDesk = () => {
+    pendingAnswerRef.current = false;
     toast({ title: 'Pick up on your desk phone to answer.' });
     dismiss();
   };
 
   const handleDecline = () => {
+    pendingAnswerRef.current = false;
     if (incomingCall) decline();
     dismiss();
     toast({ title: 'Dismissed on this device', description: 'Other ringers continue.' });

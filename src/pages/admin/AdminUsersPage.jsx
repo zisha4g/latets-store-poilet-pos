@@ -42,7 +42,22 @@ const AdminUsersPage = () => {
     const { data, error } = await supabase.functions.invoke('voice-admin', {
       body: { action, ...payload },
     });
-    if (error) throw error;
+    if (error) {
+      let detail = error.message;
+      try {
+        const ctx = error.context;
+        if (ctx && typeof ctx.json === 'function') {
+          const body = await ctx.json();
+          if (body?.error) detail = body.error;
+        } else if (ctx && typeof ctx.text === 'function') {
+          const txt = await ctx.text();
+          if (txt) detail = txt;
+        }
+      } catch {
+        // ignore
+      }
+      throw new Error(detail);
+    }
     if (data?.error) throw new Error(data.error);
     return data;
   }, []);
@@ -261,12 +276,12 @@ const AdminUsersPage = () => {
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex flex-wrap justify-end gap-2">
-                        {p.approval_status !== 'approved' && p.approval_status !== 'no_profile' && (
+                        {p.approval_status !== 'approved' && (
                           <Button size="sm" onClick={() => handleApprove(p.user_id)} disabled={busyId === p.user_id}>
                             <CheckCircle2 className="w-4 h-4 mr-1" /> Approve
                           </Button>
                         )}
-                        {p.approval_status !== 'rejected' && p.approval_status !== 'no_profile' && (
+                        {p.approval_status !== 'rejected' && (
                           <Button size="sm" variant="outline" onClick={() => handleReject(p)} disabled={busyId === p.user_id}>
                             <XCircle className="w-4 h-4 mr-1" /> Reject
                           </Button>

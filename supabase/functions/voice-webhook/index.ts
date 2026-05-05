@@ -1740,6 +1740,18 @@ Deno.serve(async (req: Request) => {
         ringers: resolvedRingers.map((r) => ({ kind: r.kind, target: r.target, enabled: r.enabled })),
       });
 
+      // Dedupe ringers that resolve to the same kind+target (a webrtc ringer
+      // that resolves to the same SIP URI as an existing sip ringer would
+      // otherwise cause duplicate INVITEs / forking on the carrier side).
+      const dedupedRingers: typeof resolvedRingers = [];
+      const seenTargets = new Set<string>();
+      for (const r of resolvedRingers) {
+        const key = `${r.kind}|${r.target}`;
+        if (seenTargets.has(key)) continue;
+        seenTargets.add(key);
+        dedupedRingers.push(r);
+      }
+
       const fromNumber = normalizePhone(String(body.From ?? body.from ?? ""));
       // For outbound PSTN dialing SignalWire requires a callerId that is owned
       // (or verified) on the account AND in E.164 format. The caller's own
@@ -1749,7 +1761,7 @@ Deno.serve(async (req: Request) => {
       // PSTN child to fail before it ever rings.
       const callerIdForDial =
         normalizePhone(String(channel.inbound_phone_e164 || "")) || fromNumber || null;
-      const tiers = buildRingerTiers(resolvedRingers);
+      const tiers = buildRingerTiers(dedupedRingers);
       const ringTimeout = Number(ext.ring_timeout_secs) || 25;
       const xml = extensionDialResponseForTier(tiers[0] || null, {
         timeout: ringTimeout,

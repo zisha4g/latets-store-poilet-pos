@@ -43,6 +43,7 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute.jsx';
 import '@/index.css';
 import { Toaster } from "@/components/ui/toaster.jsx";
 import { AuthProvider } from '@/contexts/SupabaseAuthContext.jsx';
+import { SoftphoneProvider } from '@/contexts/SoftphoneContext.jsx';
 import { CartProvider } from '@/hooks/useCart.jsx';
 
 const isElectron = !!(window.electronAPI);
@@ -221,10 +222,12 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <HelmetProvider>
       <AuthProvider>
-        <CartProvider>
-          <RouterProvider router={router} future={{ v7_startTransition: true }} />
-          <Toaster />
-        </CartProvider>
+        <SoftphoneProvider>
+          <CartProvider>
+            <RouterProvider router={router} future={{ v7_startTransition: true }} />
+            <Toaster />
+          </CartProvider>
+        </SoftphoneProvider>
       </AuthProvider>
     </HelmetProvider>
   </React.StrictMode>
