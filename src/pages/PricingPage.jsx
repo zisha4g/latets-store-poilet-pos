@@ -33,13 +33,22 @@ const PricingPage = () => {
     pro: {
       name: "Pro",
       price: 79,
-      features: ["All Basic Features", "Inventory Management (Unlimited)", "Full Accounting Suite", "PBX Phone System (1 Number)", "Advanced Reporting"],
+      features: [
+        "All Basic Features",
+        "PBX Phone System (1 Line, includes SMS)",
+        "Calendar & Appointments"
+      ],
       featured: true
     },
     enterprise: {
       name: "Enterprise",
-      price: 149,
-      features: ["All Pro Features", "Multi-Store Management", "PBX Phone System (Multiple Numbers)", "Dedicated Support", "API Access"]
+      price: 99,
+      features: [
+        "All Pro Features",
+        "PBX Phone System (2 Lines, includes SMS)",
+        "Self-Ordering System (up to 1,000 calls)",
+        "Extra self-ordering calls at $0.03 each (buy credits)"
+      ]
     }
   };
 

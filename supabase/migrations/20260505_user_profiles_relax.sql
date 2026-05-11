@@ -31,7 +31,7 @@ begin
   ) then
     execute $sql$
       update public.user_profiles p
-      set email = u.email
+      set email = u.emailre_NQFmaYem_5kUt3b9Vb1WKMhCC4dbN7kKn
       from auth.users u
       where p.user_id = u.id and (p.email is null or p.email = '')
     $sql$;

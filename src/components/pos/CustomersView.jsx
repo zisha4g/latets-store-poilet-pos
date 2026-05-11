@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import AddCustomerModal from './pos-components/AddCustomerModal';
 import CustomerMergeModal from './CustomerMergeModal';
 import { groupDuplicateCustomers } from '@/lib/customerMerge';
+import CallButtons from './pbx/CallButtons';
 
 const CustomersView = ({ customers, handlers, refreshData }) => {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
@@ -85,7 +86,8 @@ const CustomersView = ({ customers, handlers, refreshData }) => {
                     </div>
                     <div className="flex items-center text-sm text-muted-foreground mb-2">
                       <Phone className="w-3 h-3 mr-1" />
-                      {customer.phone}
+                      <span className="flex-1">{customer.phone}</span>
+                      <CallButtons phone={customer.phone} />
                     </div>
                     <div className="flex justify-between text-sm mt-3 pt-3 border-t">
                       <div>
@@ -129,7 +131,12 @@ const CustomersView = ({ customers, handlers, refreshData }) => {
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 lg:px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">{customer.phone}</td>
+                    <td className="px-4 lg:px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
+                      <div className="flex items-center gap-1">
+                        <span>{customer.phone}</span>
+                        <CallButtons phone={customer.phone} />
+                      </div>
+                    </td>
                     <td className="px-4 lg:px-6 py-4 whitespace-nowrap text-sm font-semibold text-primary">${(customer.totalSpent || 0).toFixed(2)}</td>
                     <td className="px-4 lg:px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">{customer.visits || 0}</td>
                   </tr>

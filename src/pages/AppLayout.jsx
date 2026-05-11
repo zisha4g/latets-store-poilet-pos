@@ -6,6 +6,7 @@ import { Toaster } from '@/components/ui/toaster';
 import Sidebar from '@/components/pos/Sidebar';
 import CallModal from '@/components/pos/pbx/CallModal';
 import IncomingCallPopup from '@/components/pos/pbx/IncomingCallPopup';
+import SoftphonePanel from '@/components/pos/pbx/SoftphonePanel';
 import { VirtualKeyboard } from '@/components/ui/VirtualKeyboard';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { useDataManagement } from '@/hooks/useDataManagement';
@@ -180,6 +181,7 @@ const AppLayout = ({ isDemo = false }) => {
         </div>
         <Toaster />
         <IncomingCallPopup />
+        <SoftphonePanel />
         <CallModal
           isOpen={!!activeCall}
           onClose={() => setActiveCall(null)}

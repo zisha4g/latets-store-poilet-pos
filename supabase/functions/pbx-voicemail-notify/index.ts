@@ -111,7 +111,7 @@ Deno.serve(async (req) => {
   const fromLabel = formatPhone(record.from_number);
   const dur = formatDuration(record.duration_seconds);
   const recordingUrl = record.recording_url || "";
-  const dashboardUrl = `${appUrl.replace(/\/$/, "")}/app/pbx/voicemails`;
+  const dashboardUrl = `${appUrl.replace(/\/$/, "")}/pbx/voicemails`;
 
   const subject = `New voicemail from ${fromLabel}${extensionLabel ? ` (${extensionLabel})` : ""}`;
   const html = `
@@ -130,7 +130,8 @@ Deno.serve(async (req) => {
     </td></tr>
     ${recordingUrl ? `
     <tr><td style="padding:20px 28px 8px;">
-      <a href="${recordingUrl}" style="display:inline-block;background:#10b981;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600;font-size:14px;">▶ Listen to recording</a>
+      <p style="margin:0 0 8px;color:#444;font-size:13px;">🎧 Recording attached — open the attachment to listen.</p>
+      <a href="${recordingUrl}" style="display:inline-block;background:#10b981;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600;font-size:14px;">Or open in browser</a>
     </td></tr>` : ""}
     <tr><td style="padding:8px 28px 24px;">
       <a href="${dashboardUrl}" style="color:#2563eb;text-decoration:none;font-size:13px;">Open voicemail inbox →</a>
@@ -146,6 +147,51 @@ Received: ${new Date(record.created_at || Date.now()).toLocaleString()}
 ${recordingUrl ? `\nRecording: ${recordingUrl}\n` : ""}
 Inbox: ${dashboardUrl}`;
 
+  // Try to fetch the recording and attach it to the email so the recipient
+  // can play it directly from their inbox without opening a browser tab.
+  // If the fetch fails (e.g. file not yet uploaded, or >40MB Resend limit)
+  // we silently fall back to the link-only email above.
+  const attachments: Array<{ filename: string; content: string; content_type?: string }> = [];
+  if (recordingUrl) {
+    try {
+      const audioResp = await fetch(recordingUrl);
+      if (audioResp.ok) {
+        const buf = new Uint8Array(await audioResp.arrayBuffer());
+        // Resend caps total payload at ~40MB; an MP3 voicemail well under
+        // that is safe. Skip if it's huge.
+        if (buf.byteLength <= 20 * 1024 * 1024) {
+          // base64 encode
+          let bin = "";
+          for (let i = 0; i < buf.byteLength; i += 0x8000) {
+            bin += String.fromCharCode.apply(
+              null,
+              Array.from(buf.subarray(i, i + 0x8000)) as unknown as number[],
+            );
+          }
+          const b64 = btoa(bin);
+          const ext = (() => {
+            const u = recordingUrl.split("?")[0];
+            const m = u.match(/\.([a-z0-9]{2,4})$/i);
+            return m ? m[1].toLowerCase() : "mp3";
+          })();
+          const ct = audioResp.headers.get("content-type")
+            || (ext === "wav" ? "audio/wav" : ext === "ogg" ? "audio/ogg" : "audio/mpeg");
+          attachments.push({
+            filename: `voicemail-${(record.id || "recording")}.${ext}`,
+            content: b64,
+            content_type: ct,
+          });
+        } else {
+          console.warn("[voicemail-notify] recording too large to attach", buf.byteLength);
+        }
+      } else {
+        console.warn("[voicemail-notify] recording fetch failed", audioResp.status);
+      }
+    } catch (e) {
+      console.warn("[voicemail-notify] recording fetch exception", e);
+    }
+  }
+
   try {
     const resp = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -154,11 +200,12 @@ Inbox: ${dashboardUrl}`;
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: recipientName ? `${recipientName} <${fromEmail}>` : fromEmail,
+        from: fromEmail,
         to: [recipientEmail],
         subject,
         html,
         text,
+        ...(attachments.length ? { attachments } : {}),
       }),
     });
     if (!resp.ok) {

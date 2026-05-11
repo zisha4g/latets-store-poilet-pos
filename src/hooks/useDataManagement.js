@@ -4,7 +4,8 @@ import { toast } from '@/components/ui/use-toast';
 import { demoData } from '@/data/sample-demo-data';
 
 const tables = [
-  'products', 'categories', 'customers', 'sales', 'invoices', 
+  'products', 'categories', 'customers', 'sales', 'invoices',
+  'invoice_payments', 'invoice_recurring_templates',
   'expenses', 'vendors', 'saved_carts', 'taxes', 'service_charges', 
   'settings', 'chart_of_accounts', 'journal_entries', 'vendor_bills',
   'purchase_orders',
@@ -45,6 +46,8 @@ export function useDataManagement(user, isDemo = false) {
     customers: [], 
     sales: [], 
     invoices: [],
+    invoicePayments: [],
+    invoiceRecurringTemplates: [],
     expenses: [], 
     vendors: [], 
     saved_carts: [], 
@@ -123,6 +126,8 @@ export function useDataManagement(user, isDemo = false) {
         customers: fetchedData.customers || [],
         sales: fetchedData.sales || [],
         invoices: fetchedData.invoices || [],
+        invoicePayments: fetchedData.invoice_payments || [],
+        invoiceRecurringTemplates: fetchedData.invoice_recurring_templates || [],
         expenses: fetchedData.expenses || [],
         vendors: fetchedData.vendors || [],
         saved_carts: fetchedData.saved_carts || [],
@@ -273,7 +278,99 @@ export function useDataManagement(user, isDemo = false) {
         }
       },
       sales: { ...createHandlers('sales') },
-      invoices: { ...createHandlers('invoices') },
+      invoices: {
+        ...createHandlers('invoices'),
+        getByDateRange: async (from, to) => {
+          let q = supabase.from('invoices').select('*').eq('user_id', user.id);
+          if (from) q = q.gte('issued_at', from);
+          if (to) q = q.lte('issued_at', to);
+          const { data, error } = await q.order('issued_at', { ascending: false });
+          if (error) throw error;
+          return data || [];
+        },
+        getByCustomer: async (customerId) => {
+          const { data, error } = await supabase.from('invoices')
+            .select('*').eq('user_id', user.id).eq('customer_id', customerId)
+            .order('created_at', { ascending: false });
+          if (error) throw error;
+          return data || [];
+        },
+        getByStatus: async (status) => {
+          const { data, error } = await supabase.from('invoices')
+            .select('*').eq('user_id', user.id).eq('status', status)
+            .order('created_at', { ascending: false });
+          if (error) throw error;
+          return data || [];
+        },
+        allocateNumber: async () => {
+          const { data, error } = await supabase.functions.invoke('next-invoice-number');
+          if (error) throw error;
+          return data;
+        },
+        recordPayment: async ({ invoiceId, amount, method = 'cash', reference = null, notes = null, paidAt = null }) => {
+          const { data: payment, error } = await supabase
+            .from('invoice_payments')
+            .insert({
+              user_id: user.id,
+              invoice_id: invoiceId,
+              amount,
+              method,
+              reference,
+              notes,
+              paid_at: paidAt || new Date().toISOString(),
+            })
+            .select()
+            .single();
+          if (error) throw error;
+          silentRefresh();
+          return payment;
+        },
+        voidInvoice: async (id, reason = null) => {
+          const { data: row, error } = await supabase
+            .from('invoices')
+            .update({ status: 'void', voided_at: new Date().toISOString(), void_reason: reason })
+            .eq('id', id)
+            .select()
+            .single();
+          if (error) throw error;
+          silentRefresh();
+          return row;
+        },
+        duplicate: async (id) => {
+          const { data: src, error: getErr } = await supabase
+            .from('invoices')
+            .select('*')
+            .eq('id', id)
+            .single();
+          if (getErr) throw getErr;
+          const allocation = await supabase.functions.invoke('next-invoice-number');
+          const number = allocation?.data?.number || `INV-${Date.now()}`;
+          const seq = allocation?.data?.seq ?? null;
+          const {
+            id: _omit, created_at: _c, updated_at: _u, paid_amount: _p, paid_at: _pa,
+            voided_at: _v, void_reason: _vr, balance_due: _bd, last_emailed_at: _le,
+            email_status: _es, recurring_template_id: _rt, parent_invoice_id: _pi,
+            ...rest
+          } = src;
+          const insertPayload = {
+            ...rest,
+            invoice_number: number,
+            invoice_number_seq: seq,
+            status: 'draft',
+            issued_at: new Date().toISOString(),
+          };
+          const { data: inserted, error: insErr } = await supabase
+            .from('invoices')
+            .insert(insertPayload)
+            .select()
+            .single();
+          if (insErr) throw insErr;
+          silentRefresh();
+          return inserted;
+        },
+      },
+      invoicePayments: { ...createHandlers('invoice_payments') },
+      invoiceRecurringTemplates: { ...createHandlers('invoice_recurring_templates') },
       expenses: { ...createHandlers('expenses') },
       vendors: { ...createHandlers('vendors') },
       savedCarts: { ...createHandlers('saved_carts') },

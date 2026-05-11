@@ -2,10 +2,27 @@ import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
-import { Trash2, Mail, MailOpen } from 'lucide-react';
+import { Trash2, Mail, MailOpen, PhoneCall, Headphones } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
+import { supabase } from '@/lib/customSupabaseClient';
+import { useSoftphone } from '@/contexts/SoftphoneContext';
+import CallButtons from './CallButtons';
+
+const formatPhone = (raw) => {
+  if (!raw) return '—';
+  const digits = String(raw).replace(/[^0-9]/g, '');
+  if (digits.length === 11 && digits.startsWith('1')) {
+    return `+1 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
+  }
+  if (digits.length === 10) {
+    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+  }
+  return raw;
+};
 
 const VoicemailsView = ({ voicemails, handlers }) => {
+  const { status: softphoneStatus, dial } = useSoftphone();
+
   const formatDuration = (seconds) => {
     if (!seconds) return '0:00';
     const m = Math.floor(seconds / 60);
@@ -40,30 +57,33 @@ const VoicemailsView = ({ voicemails, handlers }) => {
       </CardHeader>
       <CardContent className="flex-grow overflow-hidden">
         <div className="border rounded-lg h-full flex flex-col">
-          <div className="grid grid-cols-[1fr,1fr,80px,250px,100px] p-3 font-semibold border-b bg-muted/50">
+          <div className="grid grid-cols-[1.2fr,1fr,80px,250px,180px] p-3 font-semibold border-b bg-muted/50">
             <span>From</span>
             <span>Received</span>
             <span>Duration</span>
             <span>Recording</span>
-            <span>Actions</span>
+            <span className="text-center">Actions</span>
           </div>
           <ScrollArea className="flex-grow">
             {voicemails.map(vm => (
-              <div key={vm.id} className={`grid grid-cols-[1fr,1fr,80px,250px,100px] p-3 border-b last:border-b-0 items-center ${vm.is_new ? 'font-bold bg-blue-50 dark:bg-blue-900/20' : ''}`}>
-                <span>{vm.from_number}</span>
+              <div key={vm.id} className={`grid grid-cols-[1.2fr,1fr,80px,250px,180px] p-3 border-b last:border-b-0 items-center ${vm.is_new ? 'font-bold bg-blue-50 dark:bg-blue-900/20' : ''}`}>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono">{formatPhone(vm.from_number)}</span>
+                  <CallButtons phone={vm.from_number} />
+                </div>
                 <span>{new Date(vm.created_at).toLocaleString()}</span>
                 <span>{formatDuration(vm.duration_seconds)}</span>
-                <td>
+                <div>
                   <audio controls src={vm.recording_url} className="h-10 w-full" />
-                </td>
-                <td className="flex gap-2 justify-center">
-                  <Button variant="ghost" size="icon" onClick={() => toggleIsNew(vm)}>
+                </div>
+                <div className="flex gap-2 justify-center">
+                  <Button variant="ghost" size="icon" onClick={() => toggleIsNew(vm)} title={vm.is_new ? 'Mark as read' : 'Mark as new'}>
                     {vm.is_new ? <MailOpen className="w-4 h-4" /> : <Mail className="w-4 h-4" />}
                   </Button>
-                  <Button variant="destructive" size="icon" onClick={() => handleDelete(vm.id)}>
+                  <Button variant="destructive" size="icon" onClick={() => handleDelete(vm.id)} title="Delete">
                     <Trash2 className="w-4 h-4" />
                   </Button>
-                </td>
+                </div>
               </div>
             ))}
             {voicemails.length === 0 && (

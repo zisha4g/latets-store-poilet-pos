@@ -7,6 +7,7 @@ import { Toaster } from '@/components/ui/toaster';
 import PbxConsole from '@/components/pos/pbx/PbxConsole';
 import CallModal from '@/components/pos/pbx/CallModal';
 import IncomingCallPopup from '@/components/pos/pbx/IncomingCallPopup';
+import SoftphonePanel from '@/components/pos/pbx/SoftphonePanel';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
@@ -93,6 +94,8 @@ const PbxStandalonePage = () => {
           />
         </div>
         <Toaster />
+        {/* Mount the softphone UI locally — this route does NOT pass through AppLayout. */}
+        <SoftphonePanel />
         <IncomingCallPopup />
         <CallModal
           isOpen={!!activeCall}

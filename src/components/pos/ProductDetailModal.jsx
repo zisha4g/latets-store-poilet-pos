@@ -80,7 +80,16 @@ const ProductDetailModal = ({ product, categories, isOpen, onClose, onSave, onDe
   if (!product) return null;
 
   const handleSave = () => {
-    onSave(editedProduct);
+    const name = (editedProduct?.name || '').trim();
+    if (!name) {
+      toast({
+        title: 'Product name required',
+        description: 'Give this product a name before saving.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    onSave({ ...editedProduct, name });
     onClose();
   };
 

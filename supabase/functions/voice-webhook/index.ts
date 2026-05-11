@@ -569,6 +569,61 @@ ${children.join("\n")}
 </Response>`;
 };
 
+// SWML response for a parallel ring across heterogeneous target types
+// (subscriber resources + SIP URIs + PSTN numbers). LaML <Dial> can't mix
+// <Sip> and <Number> children, and it can't address Fabric subscribers at
+// all — so when we want the browser SDK to ring natively alongside the
+// desk phone we switch this single response to SWML JSON. Voice-webhook's
+// post-dial state-machine still expects a follow-up POST with
+// DialCallStatus, so after the connect we make a `request` back to the
+// same callback URL with the connect result interpolated.
+const toJsonResponse = (obj: unknown) =>
+  new Response(JSON.stringify(obj), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+
+type SwmlTarget =
+  | { type: "subscriber"; userId: string }
+  | { type: "sip"; uri: string }
+  | { type: "pstn"; e164: string };
+
+const extensionDialSwml = (
+  targets: SwmlTarget[],
+  options: { timeout: number; actionUrl: string; callerId?: string | null },
+) => {
+  const timeout = Math.max(5, Math.min(120, options.timeout || 25));
+  const parallel = targets.map((t) => {
+    if (t.type === "subscriber") return { to: `/private/storepilot-${t.userId}` };
+    if (t.type === "sip") return { to: t.uri };
+    return { to: t.e164 };
+  });
+  const connect: Record<string, unknown> = {
+    timeout,
+    answer_on_bridge: true,
+    parallel,
+  };
+  if (options.callerId) connect.from = options.callerId;
+  return {
+    version: "1.0.0",
+    sections: {
+      main: [
+        { connect },
+        {
+          request: {
+            url: options.actionUrl,
+            method: "POST",
+            params: {
+              DialCallStatus: "${connect_result}",
+              SwmlPostDial: "1",
+            },
+          },
+        },
+      ],
+    },
+  };
+};
+
 const voicemailResponse = (greeting: string, actionUrl: string) => `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say>${escapeXml(greeting)}</Say>
@@ -1349,6 +1404,27 @@ const handleLegacyFlow = (
 };
 
 Deno.serve(async (req: Request) => {
+  // ── Bridge-to-subscriber: a tiny SWML doc that connects the live
+  // PSTN/SIP call to a SignalWire Call Fabric subscriber. We hit this URL
+  // via call-modify when the user clicks "Answer in browser" — SignalWire
+  // fetches it and rewrites the in-progress call to dial the subscriber.
+  // The subscriber's @signalwire/js client receives an invite which the
+  // browser auto-accepts (because the user already pressed Answer).
+  if (req.method === "GET") {
+    const u = new URL(req.url);
+    if (u.searchParams.get("action") === "bridge_subscriber") {
+      // Disabled. See pbx commentary in repo memory: bridging an in-flight
+      // LaML call into a Fabric subscriber is not something SignalWire
+      // supports cleanly without migrating the DID to SWML or registering
+      // the browser as a SIP endpoint. Keeping the route as a 410 so that
+      // pbx-answer-in-browser surfaces a clear error instead of guessing.
+      return new Response("bridge_subscriber disabled", {
+        status: 410,
+        headers: { "content-type": "text/plain" },
+      });
+    }
+  }
+
   if (req.method !== "POST") {
     return errorXml("Phone ordering endpoint requires a post request.");
   }
@@ -1367,7 +1443,44 @@ Deno.serve(async (req: Request) => {
     headers: { "content-type": contentType },
     body: rawBody,
   });
-  const body = await parseWebhookBody(reparsedReq);
+  const parsedBody = await parseWebhookBody(reparsedReq);
+  // SignalWire SWML external scripts may use GET with call context in the
+  // query string (instead of POST form-encoded like LaML). Merge URL params
+  // into the body so all downstream lookups (To/CallSid/From) work.
+  const urlParams: Record<string, unknown> = {};
+  for (const [k, v] of new URL(req.url).searchParams.entries()) {
+    urlParams[k] = v;
+  }
+  const body: Record<string, unknown> = { ...urlParams, ...parsedBody };
+  // SWML scripts POST a JSON envelope like `{ call, vars, envs }` where
+  // `call` holds the LaML-equivalent fields under snake_case names
+  // (call.to, call.from, call.call_id, call.direction, ...). Flatten the
+  // ones we care about into the top-level body so the existing LaML-style
+  // lookups below (body.To, body.CallSid, body.From, body.CallStatus, etc.)
+  // continue to work without a separate code path.
+  const swmlCall = (parsedBody && typeof parsedBody === "object" && parsedBody.call && typeof parsedBody.call === "object")
+    ? (parsedBody.call as Record<string, unknown>)
+    : null;
+  if (swmlCall) {
+    // Prefer the dedicated *_number fields (already in E.164) over `to`/`from`
+    // which may carry a SIP URI like sip:+15551234567@host.
+    if (body.To == null && swmlCall.to_number != null) body.To = swmlCall.to_number;
+    if (body.To == null && swmlCall.to != null) body.To = swmlCall.to;
+    if (body.From == null && swmlCall.from_number != null) body.From = swmlCall.from_number;
+    if (body.From == null && swmlCall.from != null) body.From = swmlCall.from;
+    if (body.CallSid == null && swmlCall.call_id != null) body.CallSid = swmlCall.call_id;
+    if (body.CallStatus == null && swmlCall.call_state != null) body.CallStatus = swmlCall.call_state;
+    if (body.Direction == null && swmlCall.direction != null) body.Direction = swmlCall.direction;
+  }
+  console.log("voice-webhook inbound", {
+    method: req.method,
+    contentType,
+    rawBodyLen: rawBody.length,
+    urlParamKeys: Object.keys(urlParams),
+    bodyKeys: Object.keys(parsedBody || {}).slice(0, 25),
+    hasSwmlCall: !!swmlCall,
+    swmlCallKeys: swmlCall ? Object.keys(swmlCall).slice(0, 25) : [],
+  });
 
   const toNumber = normalizePhone(
     String(body.To ?? body.to ?? body.Called ?? body.called ?? body.to_number ?? body.destination ?? ""),
@@ -1469,7 +1582,7 @@ Deno.serve(async (req: Request) => {
 
     // If the call was answered the bridged audio is already flowing — when
     // the called party hangs up, SignalWire still POSTs back here. We just
-    // hang up gracefully.
+    // hang up gracefully. SWML's connect_result reports "answered" too.
     if (dialStatus === "answered" || dialStatus === "completed") {
       await adminClient
         .from("phone_call_sessions")
@@ -1763,11 +1876,31 @@ Deno.serve(async (req: Request) => {
         normalizePhone(String(channel.inbound_phone_e164 || "")) || fromNumber || null;
       const tiers = buildRingerTiers(dedupedRingers);
       const ringTimeout = Number(ext.ring_timeout_secs) || 25;
-      const xml = extensionDialResponseForTier(tiers[0] || null, {
-        timeout: ringTimeout,
-        actionUrl: callbackUrl,
-        callerId: callerIdForDial,
-      });
+
+      // Build the unified target list for SWML parallel ring: subscriber
+      // (assigned user's browser) + every SIP URI + every PSTN number,
+      // all in one connect verb. This replaces the LaML <Dial> tier loop
+      // because LaML can't dial Fabric subscribers and can't mix Sip with
+      // Number children in the same verb.
+      const swmlTargets: SwmlTarget[] = [];
+      if (ext.assigned_user_id) {
+        swmlTargets.push({ type: "subscriber", userId: String(ext.assigned_user_id) });
+      }
+      for (const t of buildRingerTiers(dedupedRingers)) {
+        if (t.kind === "sip") {
+          for (const uri of t.targets) swmlTargets.push({ type: "sip", uri });
+        } else if (t.kind === "pstn") {
+          for (const e164 of t.targets) swmlTargets.push({ type: "pstn", e164 });
+        }
+      }
+
+      const swmlBody = swmlTargets.length
+        ? extensionDialSwml(swmlTargets, {
+            timeout: ringTimeout,
+            actionUrl: callbackUrl,
+            callerId: callerIdForDial,
+          })
+        : null;
 
       await adminClient
         .from("phone_call_sessions")
@@ -1819,12 +1952,43 @@ Deno.serve(async (req: Request) => {
           metadata: {
             channel_label: channel.label || null,
             extension_name: ext.name || null,
+            provider_call_id: providerCallId || null,
           },
         });
       } catch (ringErr) {
         console.warn("voice-webhook ring_start broadcast failed", ringErr);
       }
 
+      // SWML mode (DID configured as a SWML script in the SignalWire
+      // dashboard pointing at this URL with ?mode=swml): return a single
+      // SWML doc that rings subscriber + SIP + PSTN in parallel and falls
+      // through to "we are unavailable" hangup if nobody answers. This is
+      // the only path that lets the browser ring natively because LaML
+      // <Dial> can't address a Fabric subscriber.
+      const reqUrl = new URL(req.url);
+      const swmlMode = reqUrl.searchParams.get("mode") === "swml";
+      if (swmlMode && swmlBody) {
+        console.log("voice-webhook returning SWML", {
+          targets: swmlTargets.length,
+          targetKinds: swmlTargets.map((t) => t.type),
+          bodyPreview: JSON.stringify(swmlBody).slice(0, 1200),
+        });
+        return toJsonResponse(swmlBody);
+      }
+      if (swmlMode && !swmlBody) {
+        console.warn("voice-webhook SWML mode but no targets — falling back to hangup");
+      }
+
+      // LaML XML response — the default path for DIDs configured as LaML
+      // webhooks. Browser doesn't ring natively in this mode; only the
+      // configured SIP/PSTN ringers get the call.
+      const xml = extensionDialResponseForTier(tiers[0] || null, {
+        timeout: ringTimeout,
+        actionUrl: callbackUrl,
+        callerId: callerIdForDial,
+      });
+      void swmlBody;
+      void swmlTargets;
       return toXmlResponse(xml);
     }
     if (leaf.type === "flow") {

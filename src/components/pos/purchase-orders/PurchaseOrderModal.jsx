@@ -1,18 +1,16 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
-import { ChevronsUpDown, Plus, Trash2, Save, Printer, Check } from 'lucide-react';
+import { Plus, Trash2, Printer } from 'lucide-react';
 import CurrencyInput from '@/components/ui/CurrencyInput';
 import { toast } from '@/components/ui/use-toast';
 import VendorModal from '../VendorModal';
 import ProductDetailModal from '../ProductDetailModal';
 import PrintLabelsModal from '../PrintLabelsModal';
-import { cn } from '@/lib/utils';
+import VendorCombobox from './VendorCombobox';
+import PurchaseOrderItemPicker from './PurchaseOrderItemPicker';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 
@@ -177,13 +175,13 @@ const PurchaseOrderModal = ({ isOpen, onClose, purchaseOrder, vendors, products,
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
               <div>
                 <Label>Vendor</Label>
-                <Select value={po.vendor_id || ''} onValueChange={val => setPo(p => ({ ...p, vendor_id: val }))} disabled={isReceived}>
-                  <SelectTrigger><SelectValue placeholder="Select a vendor" /></SelectTrigger>
-                  <SelectContent>
-                    <Button variant="ghost" className="w-full justify-start" onClick={() => setIsVendorModalOpen(true)}><Plus className="w-4 h-4 mr-2" />Add New Vendor</Button>
-                    {vendors.map(v => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <VendorCombobox
+                  vendors={vendors}
+                  value={po.vendor_id || null}
+                  onChange={(id) => setPo((p) => ({ ...p, vendor_id: id }))}
+                  onAddNew={() => setIsVendorModalOpen(true)}
+                  disabled={isReceived}
+                />
               </div>
               <div><Label>PO Number</Label><Input value={po.po_number} onChange={e => setPo(p => ({ ...p, po_number: e.target.value }))} disabled={isReceived} /></div>
               <div><Label>Order Date</Label><Input type="date" value={po.order_date} onChange={e => setPo(p => ({ ...p, order_date: e.target.value }))} disabled={isReceived} /></div>
@@ -192,7 +190,13 @@ const PurchaseOrderModal = ({ isOpen, onClose, purchaseOrder, vendors, products,
 
             <div className="mb-4">
               <Label>Add Items</Label>
-              <ProductSearchCombobox products={products} onSelect={handleAddItem} onAddNew={() => setIsProductModalOpen(true)} disabled={isReceived} />
+              <PurchaseOrderItemPicker
+                products={products}
+                onAddItem={handleAddItem}
+                onAddNew={() => setIsProductModalOpen(true)}
+                disabled={isReceived}
+                selectedProductIds={po.items.map((it) => it.product_id).filter(Boolean)}
+              />
             </div>
 
             <div className="border rounded-lg overflow-hidden">
@@ -250,49 +254,6 @@ const PurchaseOrderModal = ({ isOpen, onClose, purchaseOrder, vendors, products,
       {isProductModalOpen && <ProductDetailModal isOpen={isProductModalOpen} onClose={() => setIsProductModalOpen(false)} product={{}} categories={[]} onSave={handleSaveProduct} handlers={handlers} initialMode="edit" />}
       {isPrintLabelsModalOpen && <PrintLabelsModal isOpen={isPrintLabelsModalOpen} onClose={() => setIsPrintLabelsModalOpen(false)} selectedProducts={productsToPrint} source="po" />}
     </>
-  );
-};
-
-const ProductSearchCombobox = ({ products, onSelect, onAddNew, disabled }) => {
-  const [open, setOpen] = useState(false);
-  const [value, setValue] = useState("");
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between" disabled={disabled}>
-          Search for a product to add...
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
-        <Command>
-          <CommandInput placeholder="Search product by name, SKU, or barcode..." onValueChange={setValue} />
-          <CommandList>
-            <CommandEmpty>
-              <Button className="w-full" variant="outline" onClick={() => { onAddNew(); setOpen(false); }}>
-                <Plus className="mr-2 h-4 w-4" /> Create new product
-              </Button>
-            </CommandEmpty>
-            <CommandGroup>
-              {(products || []).map((product) => (
-                <CommandItem
-                  key={product.id}
-                  value={`${product.name} ${product.sku} ${product.barcode}`}
-                  onSelect={() => {
-                    onSelect(product);
-                    setOpen(false);
-                  }}
-                >
-                  <Check className={cn("mr-2 h-4 w-4", "opacity-0")} />
-                  {product.name} <span className="text-xs text-muted-foreground ml-2">({product.sku})</span>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
   );
 };
 

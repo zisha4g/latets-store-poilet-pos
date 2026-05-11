@@ -1,0 +1,337 @@
+// SoftphoneProvider — single SignalWire Call Fabric client per app session.
+//
+// Public API (consumed by IncomingCallPopup and any other UI):
+//   - status:        'idle' | 'connecting' | 'registered' | 'no-credentials' | 'failed'
+//   - incomingCall:  null | { accept, reject, details }    (an unanswered invite)
+//   - activeCall:    null | FabricRoomSession              (an answered/active call)
+//   - answer():      pick up the current incomingCall
+//   - decline():     reject the current incomingCall
+//   - hangup():      end the activeCall
+//
+// SignalWire handles all of the SIP/WebRTC/TURN plumbing internally — we
+// just hold one client, mark it online, and surface the events.
+
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { SignalWire } from '@signalwire/js';
+import { supabase } from '@/lib/customSupabaseClient';
+import { useAuth } from '@/contexts/SupabaseAuthContext';
+
+const SoftphoneContext = createContext(null);
+
+export const useSoftphone = () => {
+  const ctx = useContext(SoftphoneContext);
+  if (!ctx) {
+    return {
+      status: 'idle', incomingCall: null, activeCall: null,
+      panelOpen: false, openPanel: () => {}, closePanel: () => {},
+      answer: () => {}, decline: () => {}, hangup: () => {},
+      dial: async () => { throw new Error('Softphone not connected'); },
+      sendDigits: async () => {},
+      setMuted: async () => {},
+      expectIncomingAccept: () => {},
+    };
+  }
+  return ctx;
+};
+
+// ---------- Module-level singletons ----------
+// These survive React StrictMode's double-mount and HMR so we never end up
+// with two SignalWire clients fighting over the same subscriber identity.
+
+let sharedAudioEl = null;
+let moduleClient = null;        // active SignalWire client
+let moduleClientUserId = null;  // Supabase user id this client is for
+let moduleClientStarting = null; // Promise<client> while connecting (de-dupe)
+let moduleStopTimer = null;
+// When the popup's "Answer in browser" button is clicked we tell
+// SignalWire (via pbx-answer-in-browser → call-modify) to bridge the
+// live PSTN call into our subscriber. The resulting `call.received`
+// event arrives a moment later — this flag tells the handler to accept
+// it automatically instead of waiting for a second user click.
+let moduleAutoAcceptUntil = 0;
+
+const ensureAudioElement = () => {
+  if (sharedAudioEl) return sharedAudioEl;
+  const el = document.createElement('audio');
+  el.autoplay = true;
+  el.id = 'pbx-softphone-audio';
+  el.setAttribute('playsinline', '');
+  document.body.appendChild(el);
+  sharedAudioEl = el;
+  return el;
+};
+
+const fetchSubscriberToken = async () => {
+  const { data, error } = await supabase.functions.invoke('pbx-subscriber-token');
+  if (error) throw new Error(error.message || 'failed to mint subscriber token');
+  if (!data?.token) throw new Error('subscriber token missing in response');
+  return data.token;
+};
+
+export const SoftphoneProvider = ({ children }) => {
+  const { user } = useAuth();
+  const [status, setStatus] = useState('idle');
+  const [incomingCall, setIncomingCall] = useState(null);
+  const [activeCall, setActiveCall] = useState(null);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const openPanel = useCallback(() => setPanelOpen(true), []);
+  const closePanel = useCallback(() => setPanelOpen(false), []);
+  const incomingCallRef = useRef(null);
+  const activeCallRef = useRef(null);
+
+  const setIncoming = useCallback((val) => {
+    incomingCallRef.current = val;
+    setIncomingCall(val);
+  }, []);
+  const setActive = useCallback((val) => {
+    activeCallRef.current = val;
+    setActiveCall(val);
+  }, []);
+
+  // Wire common events onto an answered/joined FabricRoomSession.
+  const wireSession = useCallback((session) => {
+    const cleanup = () => {
+      console.log('[softphone] session ended');
+      setActive((cur) => (cur === session ? null : cur));
+    };
+    try {
+      session.on('destroy', cleanup);
+      session.on('room.left', cleanup);
+      session.on('call.left', cleanup);
+      session.on('call.state', (params) => {
+        console.log('[softphone] call.state', params?.callState);
+        if (['ended', 'destroy', 'terminated'].includes(String(params?.callState))) cleanup();
+      });
+    } catch (e) {
+      console.warn('[softphone] wireSession error', e);
+    }
+  }, [setActive]);
+
+  useEffect(() => {
+    if (!user?.id) return undefined;
+
+    // Reuse an existing client for this user (StrictMode / HMR safety).
+    if (moduleStopTimer) { clearTimeout(moduleStopTimer); moduleStopTimer = null; }
+
+    let cancelled = false;
+    const audioEl = ensureAudioElement();
+
+    const handleIncoming = ({ invite }) => {
+      console.log('[softphone] incoming call', invite?.details?.caller_id_number);
+      // Reject duplicate forks while one is already on the line.
+      if (incomingCallRef.current || activeCallRef.current) {
+        console.log('[softphone] rejecting duplicate invite');
+        try { invite.reject(); } catch { /* noop */ }
+        return;
+      }
+      const acceptInvite = async () => {
+        try { audioEl.play().catch(() => {}); } catch { /* noop */ }
+        const session = await invite.accept({
+          audio: true,
+          video: false,
+          rootElement: audioEl,
+          negotiateAudio: true,
+          negotiateVideo: false,
+        });
+        console.log('[softphone] accepted, session=', session?.id);
+        setIncoming(null);
+        setActive(session);
+        wireSession(session);
+        return session;
+      };
+      const wrapped = {
+        accept: acceptInvite,
+        reject: async () => {
+          try { await invite.reject(); } catch (e) { console.warn('[softphone] reject failed', e); }
+          setIncoming(null);
+        },
+        details: invite.details,
+      };
+      setIncoming(wrapped);
+      // If the user already pressed "Answer in browser", auto-accept the
+      // freshly-arrived invite. The window is short to avoid grabbing
+      // unrelated future calls.
+      if (Date.now() < moduleAutoAcceptUntil) {
+        moduleAutoAcceptUntil = 0;
+        acceptInvite().catch((e) => console.warn('[softphone] auto-accept failed', e));
+      }
+    };
+
+    const startClient = async () => {
+      // De-dupe concurrent starts (StrictMode invokes effect twice).
+      if (moduleClient && moduleClientUserId === user.id) {
+        return moduleClient;
+      }
+      if (moduleClientStarting) return moduleClientStarting;
+
+      moduleClientStarting = (async () => {
+        setStatus('connecting');
+        const token = await fetchSubscriberToken();
+        if (cancelled) return null;
+        const client = await SignalWire({ token });
+        if (cancelled) {
+          try { await client.disconnect?.(); } catch { /* noop */ }
+          return null;
+        }
+        moduleClient = client;
+        moduleClientUserId = user.id;
+        await client.online({
+          incomingCallHandlers: {
+            all: handleIncoming,
+          },
+        });
+        console.log('[softphone] client online');
+        return client;
+      })().catch((e) => {
+        console.error('[softphone] start failed', e);
+        moduleClient = null;
+        moduleClientUserId = null;
+        if (!cancelled) setStatus('failed');
+        return null;
+      }).finally(() => {
+        moduleClientStarting = null;
+      });
+
+      return moduleClientStarting;
+    };
+
+    startClient().then((client) => {
+      if (cancelled || !client) return;
+      setStatus('registered');
+    });
+
+    return () => {
+      cancelled = true;
+      // Defer client disconnect so a quick remount can reuse it.
+      moduleStopTimer = setTimeout(async () => {
+        if (moduleClient) {
+          try { await moduleClient.offline?.(); } catch { /* noop */ }
+          try { await moduleClient.disconnect?.(); } catch { /* noop */ }
+        }
+        moduleClient = null;
+        moduleClientUserId = null;
+        moduleStopTimer = null;
+      }, 1000);
+    };
+  }, [user?.id, setIncoming, setActive, wireSession]);
+
+  const answer = useCallback(async () => {
+    const inv = incomingCallRef.current;
+    if (!inv) return;
+    try {
+      await inv.accept();
+    } catch (e) {
+      console.error('[softphone] answer failed', e);
+    }
+  }, []);
+
+  const decline = useCallback(async () => {
+    const inv = incomingCallRef.current;
+    if (!inv) return;
+    try { await inv.reject(); } catch (e) { console.warn('[softphone] decline failed', e); }
+  }, []);
+
+  const hangup = useCallback(async () => {
+    const session = activeCallRef.current;
+    if (!session) return;
+    try {
+      if (typeof session.hangup === 'function') await session.hangup();
+      else if (typeof session.leave === 'function') await session.leave();
+    } catch (e) { console.warn('[softphone] hangup failed', e); }
+    setActive(null);
+  }, [setActive]);
+
+  // Send DTMF digits down the active call.
+  const sendDigits = useCallback(async (digits) => {
+    const session = activeCallRef.current;
+    if (!session || !digits) return;
+    try {
+      if (typeof session.sendDigits === 'function') {
+        await session.sendDigits(String(digits));
+      } else if (typeof session.dtmf === 'function') {
+        for (const d of String(digits)) await session.dtmf(d);
+      }
+    } catch (e) { console.warn('[softphone] sendDigits failed', e); }
+  }, []);
+
+  // Mute / unmute the local microphone on the active call.
+  const setMuted = useCallback(async (muted) => {
+    const session = activeCallRef.current;
+    if (!session) return;
+    try {
+      if (muted) {
+        if (typeof session.audioMute === 'function') await session.audioMute();
+        else if (typeof session.mute === 'function') await session.mute();
+      } else {
+        if (typeof session.audioUnmute === 'function') await session.audioUnmute();
+        else if (typeof session.unmute === 'function') await session.unmute();
+      }
+    } catch (e) { console.warn('[softphone] setMuted failed', e); }
+  }, []);
+
+  // Outbound dial via the browser softphone. Returns the FabricRoomSession
+  // on success, or throws if the client isn't online yet.
+  const dial = useCallback(async (target) => {
+    if (!moduleClient) throw new Error('Softphone not connected');
+    const audioEl = ensureAudioElement();
+    try { audioEl.play().catch(() => {}); } catch { /* noop */ }
+
+    // Normalise input to a SignalWire Fabric address.
+    let to = String(target || '').trim();
+    if (!to.startsWith('/')) {
+      const digits = to.replace(/[^0-9+]/g, '');
+      let e164 = digits;
+      if (!e164.startsWith('+')) {
+        const numeric = digits.replace(/[^0-9]/g, '');
+        if (numeric.length === 10) e164 = `+1${numeric}`;
+        else if (numeric.length === 11 && numeric.startsWith('1')) e164 = `+${numeric}`;
+        else e164 = `+${numeric}`;
+      }
+      to = e164;
+    }
+    console.log('[softphone] dial →', to);
+
+    let session;
+    try {
+      session = await moduleClient.dial({
+        to,
+        audio: true,
+        video: false,
+        rootElement: audioEl,
+        negotiateAudio: true,
+        negotiateVideo: false,
+      });
+    } catch (err) {
+      console.error('[softphone] dial failed', err);
+      throw err;
+    }
+    try {
+      ['call.state','call.joined','call.left','room.joined','room.left',
+       'destroy','active','update','member.joined','member.left'].forEach((ev) => {
+        session.on(ev, (...args) => console.log(`[softphone] session.${ev}`, ...args));
+      });
+    } catch (e) { console.warn('[softphone] event wiring failed', e); }
+    try {
+      if (typeof session.start === 'function') {
+        await session.start();
+      }
+    } catch (e) {
+      console.error('[softphone] session.start failed', e);
+    }
+    setActive(session);
+    wireSession(session);
+    return session;
+  }, [setActive, wireSession]);
+
+  // Tell the next incoming invite to auto-accept. Used by the popup when
+  // the user has already pressed Answer for a Realtime-driven ring.
+  const expectIncomingAccept = useCallback((ms = 15000) => {
+    moduleAutoAcceptUntil = Date.now() + Math.max(1000, Math.min(60000, ms));
+  }, []);
+
+  return (
+    <SoftphoneContext.Provider value={{ status, incomingCall, activeCall, panelOpen, openPanel, closePanel, answer, decline, hangup, dial, sendDigits, setMuted, expectIncomingAccept }}>
+      {children}
+    </SoftphoneContext.Provider>
+  );
+};

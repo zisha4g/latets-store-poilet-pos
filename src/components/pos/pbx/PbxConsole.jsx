@@ -20,15 +20,21 @@ import ExtensionsManager from '@/components/pos/pbx/ExtensionsManager';
 import PbxDashboard from '@/components/pos/pbx/PbxDashboard';
 import CallLogsView from '@/components/pos/pbx/CallLogsView';
 import VoicemailsView from '@/components/pos/pbx/VoicemailsView';
+import SmsView from '@/components/pos/pbx/SmsView';
 import PhoneNumbersSettings from '@/components/pos/settings/PhoneNumbersSettings';
+import { useSoftphone } from '@/contexts/SoftphoneContext';
 
-// Section registry. `component` = live UI; `planned` = list of features
-// rendered as a roadmap card so nothing is forgotten before we build it.
+// Each group has a `mode`: 'comm' (day-to-day communication) or 'config'
+// (admin configuration). The sidebar shows only one mode at a time, toggled
+// by a Communication ↔ Settings switcher in the sidebar header.
 const SECTION_GROUPS = [
+  // ─── COMMUNICATION ──────────────────────────────────────────────────────
   {
     label: 'Overview',
+    mode: 'comm',
     items: [
       { id: 'dashboard', name: 'Dashboard', icon: LayoutDashboard, status: 'live' },
+      { id: 'softphone', name: 'Softphone', icon: Phone, status: 'live' },
       { id: 'live', name: 'Live calls', icon: PhoneCall, status: 'planned', phase: 2,
         planned: ['Active calls (caller, agent, duration)', 'Queue depth & wait times', 'Agents online / paused', 'Barge / whisper / monitor'] },
       { id: 'reports', name: 'Reports', icon: BarChart3, status: 'planned', phase: 2,
@@ -36,7 +42,27 @@ const SECTION_GROUPS = [
     ],
   },
   {
+    label: 'Calls',
+    mode: 'comm',
+    items: [
+      { id: 'logs', name: 'Call logs', icon: History, status: 'live' },
+      { id: 'voicemails', name: 'Voicemails', icon: Voicemail, status: 'live' },
+    ],
+  },
+  {
+    label: 'Messaging',
+    mode: 'comm',
+    items: [
+      { id: 'sms', name: 'SMS / MMS', icon: MessageSquare, status: 'live' },
+      { id: 'fax', name: 'Fax', icon: Printer, status: 'planned', phase: 3,
+        planned: ['Inbound fax → PDF in Supabase', 'Email notification', 'Outbound fax via SignalWire Fax API'] },
+    ],
+  },
+
+  // ─── CONFIGURATION ──────────────────────────────────────────────────────
+  {
     label: 'Numbers & Trunks',
+    mode: 'config',
     items: [
       { id: 'numbers', name: 'Phone numbers', icon: Hash, status: 'live' },
       { id: 'locations', name: 'Locations', icon: Building2, status: 'planned', phase: 2,
@@ -45,6 +71,7 @@ const SECTION_GROUPS = [
   },
   {
     label: 'Users & Devices',
+    mode: 'config',
     items: [
       { id: 'extensions', name: 'Extensions', icon: PhoneForwarded, status: 'live' },
       { id: 'devices', name: 'Phones', icon: Headphones, status: 'live' },
@@ -54,6 +81,7 @@ const SECTION_GROUPS = [
   },
   {
     label: 'Inbound Routing',
+    mode: 'config',
     items: [
       { id: 'ivr', name: 'IVR / Auto attendant', icon: ListTree, status: 'live' },
       { id: 'hours', name: 'Business hours', icon: Clock, status: 'live' },
@@ -67,6 +95,7 @@ const SECTION_GROUPS = [
   },
   {
     label: 'Outbound',
+    mode: 'config',
     items: [
       { id: 'click_to_call', name: 'Click-to-call', icon: PhoneOutgoing, status: 'planned', phase: 1,
         planned: ['Dial from any customer card', 'Dial from order / invoice screens', 'Per-extension outbound caller ID', 'Outbound rules (prefix stripping)'] },
@@ -74,8 +103,8 @@ const SECTION_GROUPS = [
   },
   {
     label: 'Voicemail & Greetings',
+    mode: 'config',
     items: [
-      { id: 'voicemails', name: 'Voicemails', icon: Voicemail, status: 'live' },
       { id: 'greetings', name: 'Greetings & audio', icon: Music, status: 'live' },
       { id: 'vm_advanced', name: 'Voicemail features', icon: Voicemail, status: 'planned', phase: 1,
         planned: ['Per-extension + group mailboxes', 'Custom greetings (busy / unavailable / temporary)', 'Voicemail-to-email (audio attachment)', 'Voicemail-to-text transcription', 'Phone access via *97 with PIN'] },
@@ -83,8 +112,8 @@ const SECTION_GROUPS = [
   },
   {
     label: 'Call Handling',
+    mode: 'config',
     items: [
-      { id: 'logs', name: 'Call logs', icon: History, status: 'live' },
       { id: 'recording', name: 'Call recording', icon: Mic, status: 'planned', phase: 1,
         planned: ['Per-flow / per-extension / manual recording', 'Storage in Supabase pbx_recordings bucket', 'Pause/resume during card capture (PCI)', 'Retention policy & auto-purge', 'Consent prompt'] },
       { id: 'features', name: 'Call features', icon: Wand2, status: 'planned', phase: 1,
@@ -94,16 +123,8 @@ const SECTION_GROUPS = [
     ],
   },
   {
-    label: 'Messaging',
-    items: [
-      { id: 'sms', name: 'SMS / MMS', icon: MessageSquare, status: 'planned', phase: 2,
-        planned: ['Inbound SMS thread per customer', 'Outbound from POS (order ready, delivery, payment links)', 'Auto-replies on keywords', 'Broadcast / marketing with opt-out', 'MMS for receipts / product photos'] },
-      { id: 'fax', name: 'Fax', icon: Printer, status: 'planned', phase: 3,
-        planned: ['Inbound fax → PDF in Supabase', 'Email notification', 'Outbound fax via SignalWire Fax API'] },
-    ],
-  },
-  {
     label: 'CRM & AI',
+    mode: 'config',
     items: [
       { id: 'crm', name: 'CRM integration', icon: UserSquare2, status: 'planned', phase: 1,
         planned: ['Screen pop on inbound call (customer card + order history)', 'Caller-ID lookup against customers (already partial)', 'Auto-create customer on unknown inbound', 'Call notes & disposition (sale / lead / support / no-answer)', 'Link call → sale → invoice activity feed'] },
@@ -113,6 +134,7 @@ const SECTION_GROUPS = [
   },
   {
     label: 'Admin',
+    mode: 'config',
     items: [
       { id: 'security', name: 'Security & compliance', icon: ShieldCheck, status: 'planned', phase: 3,
         planned: ['HMAC verification (already live)', 'SIP IP allowlist', 'International call cap / fraud rate limit', 'TLS / SRTP (default)', 'PCI: pause recording on DTMF (already live in payment node)', 'Recording retention policies'] },
@@ -123,6 +145,9 @@ const SECTION_GROUPS = [
     ],
   },
 ];
+
+// Default landing section per mode (used when toggling between modes).
+const MODE_DEFAULT_ID = { comm: 'dashboard', config: 'numbers' };
 
 const StatusPill = ({ status, phase }) => {
   if (status === 'live') {
@@ -158,8 +183,38 @@ const PlannedSection = ({ item }) => (
   </Card>
 );
 
+// Softphone section: the actual UI lives in the global SoftphonePanel
+// overlay. This section just opens the panel on mount and shows a hint
+// for when the user dismisses it.
+const SoftphoneSection = ({ openPanel }) => {
+  useEffect(() => { openPanel(); }, [openPanel]);
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Phone className="w-5 h-5" /> Softphone
+        </CardTitle>
+        <CardDescription>
+          The dialer is shown as a floating panel. Click the button below to
+          reopen it if you closed it.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Button onClick={openPanel}>
+          <Phone className="w-4 h-4 mr-2" /> Open dialer
+        </Button>
+      </CardContent>
+    </Card>
+  );
+};
+
 const PbxConsole = ({ pbxData, handlers, onSimulateCall, onReturnToPos, embedded = false }) => {
-  const allItems = SECTION_GROUPS.flatMap((g) => g.items);
+  const { openPanel } = useSoftphone();
+  const allItems = SECTION_GROUPS.flatMap((g) => g.items).filter((i) => !i.action);
+
+  // When the Softphone section becomes active, ensure the dialer panel is open.
+  // (The panel is a global overlay; this just guarantees visibility on nav.)
+
   const validIds = new Set(allItems.map((i) => i.id));
   const params = useParams();
   const navigate = useNavigate();
@@ -183,14 +238,28 @@ const PbxConsole = ({ pbxData, handlers, onSimulateCall, onReturnToPos, embedded
 
   const active = allItems.find((i) => i.id === activeId) || allItems[0];
 
+  // The mode (Communication vs Settings) is derived from the active section
+  // so deep-links land on the correct sidebar view.
+  const activeGroup = SECTION_GROUPS.find((g) => g.items.some((i) => i.id === active.id));
+  const activeMode = activeGroup?.mode || 'comm';
+  const switchMode = (mode) => {
+    if (mode === activeMode) return;
+    setActiveId(MODE_DEFAULT_ID[mode]);
+  };
+  const visibleGroups = SECTION_GROUPS.filter((g) => g.mode === activeMode);
+
   const renderActive = () => {
     switch (active.id) {
       case 'dashboard':
         return <PbxDashboard pbxData={pbxData} onSimulateCall={onSimulateCall} />;
+      case 'softphone':
+        return <SoftphoneSection openPanel={openPanel} />;
       case 'logs':
         return <CallLogsView callLogs={callLogs} />;
       case 'voicemails':
         return <VoicemailsView handlers={handlers.pbx.voicemails} voicemails={voicemails} />;
+      case 'sms':
+        return <SmsView />;
       case 'hours':
         return <BusinessHoursManager businessHours={businessHours} onUpdate={handlers.pbx.business_hours.upsert} />;
       case 'greetings':
@@ -235,18 +304,54 @@ const PbxConsole = ({ pbxData, handlers, onSimulateCall, onReturnToPos, embedded
       <div className="flex-1 flex min-h-0">
         {/* Left rail nav */}
         <aside className="w-64 shrink-0 border-r border-border overflow-y-auto py-3">
-          {SECTION_GROUPS.map((group) => (
+          {/* Mode switcher: Communication ↔ Settings */}
+          <div className="px-3 mb-3">
+            <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-muted">
+              <button
+                onClick={() => switchMode('comm')}
+                className={`flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  activeMode === 'comm'
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <PhoneCall className="w-3.5 h-3.5" />
+                Communication
+              </button>
+              <button
+                onClick={() => switchMode('config')}
+                className={`flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  activeMode === 'config'
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <SettingsIcon className="w-3.5 h-3.5" />
+                Settings
+              </button>
+            </div>
+          </div>
+
+          {visibleGroups.map((group) => (
             <div key={group.label} className="mb-3">
               <div className="px-4 py-1 text-[11px] uppercase tracking-wider text-muted-foreground">
                 {group.label}
               </div>
               <ul>
                 {group.items.map((item) => {
-                  const isActive = item.id === activeId;
+                  const isActive = item.id === activeId && !item.action;
                   return (
                     <li key={item.id}>
                       <button
-                        onClick={() => setActiveId(item.id)}
+                        onClick={() => {
+                          if (item.id === 'softphone') {
+                            // Navigate AND open the panel so it's instant.
+                            setActiveId(item.id);
+                            openPanel();
+                          } else {
+                            setActiveId(item.id);
+                          }
+                        }}
                         className={`w-full flex items-center gap-2 px-4 py-2 text-sm transition-colors ${
                           isActive
                             ? 'bg-primary/10 text-primary border-l-2 border-primary'
