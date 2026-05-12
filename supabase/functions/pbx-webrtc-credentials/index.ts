@@ -117,28 +117,102 @@ Deno.serve(async (req) => {
       const sendCallsUrl = `${SUPABASE_URL}/functions/v1/pbx-sip-outbound?user=${encodeURIComponent(userId)}`;
       const basic = btoa(`${PROJECT_ID}:${API_TOKEN}`);
       const baseUrl = `https://${SPACE}`;
-      const lookup = await fetch(
-        `${baseUrl}/api/relay/rest/endpoints/sip?filter_name=${encodeURIComponent(existing.sip_username)}`,
-        { headers: { Authorization: `Basic ${basic}`, Accept: "application/json" } },
-      );
-      if (lookup.ok) {
-        const j: any = await lookup.json().catch(() => null);
-        const items: any[] = j?.data ?? (Array.isArray(j) ? j : []);
-        const found = items.find((e) => e?.username === existing.sip_username);
-        if (found?.id) {
-          await fetch(`${baseUrl}/api/relay/rest/endpoints/sip/${found.id}`, {
-            method: "PUT",
-            headers: {
-              Authorization: `Basic ${basic}`,
-              "Content-Type": "application/json",
-              Accept: "application/json",
-            },
-            body: JSON.stringify({
-              send_calls_url: sendCallsUrl,
-              send_calls_method: "POST",
-            }),
-          }).catch(() => { /* best-effort */ });
+
+      // Paginate through all SIP endpoints — `filter_name` is unreliable
+      // for endpoints not created via our auto-provisioner (e.g. "web-101"
+      // created manually in the SignalWire console).
+      const allEndpoints: any[] = [];
+      let pageUrl: string | null =
+        `${baseUrl}/api/relay/rest/endpoints/sip?page_size=100`;
+      let safety = 10;
+      while (pageUrl && safety-- > 0) {
+        const r: Response = await fetch(pageUrl, {
+          headers: { Authorization: `Basic ${basic}`, Accept: "application/json" },
+        });
+        if (!r.ok) {
+          const body = await r.text().catch(() => "");
+          console.warn("[selfheal] list failed", r.status, body.slice(0, 300));
+          break;
         }
+        const j: any = await r.json().catch(() => null);
+        const items: any[] = j?.data ?? (Array.isArray(j) ? j : []);
+        allEndpoints.push(...items);
+        const next: string | null =
+          j?.links?.next || j?.next_page_url || null;
+        pageUrl = next ? (next.startsWith("http") ? next : `${baseUrl}${next}`) : null;
+      }
+
+      console.log(
+        "[selfheal] endpoints seen",
+        allEndpoints.length,
+        allEndpoints.map((e) => ({
+          id: e?.id,
+          username: e?.username,
+          name: e?.name,
+          send_calls_url: e?.send_calls_url,
+          caller_id: e?.caller_id,
+        })),
+      );
+
+      const wanted = String(existing.sip_username || "").toLowerCase();
+      const found = allEndpoints.find(
+        (e) =>
+          String(e?.username || "").toLowerCase() === wanted ||
+          String(e?.name || "").toLowerCase() === wanted,
+      );
+
+      if (found?.id) {
+        // Pull this user's caller_id to also keep it fresh on the
+        // endpoint itself — SignalWire uses it when our webhook can't be
+        // reached.
+        let callerId: string | null = null;
+        try {
+          const { data: chan } = await admin
+            .from("store_channels")
+            .select("inbound_phone_e164")
+            .eq("user_id", userId)
+            .order("created_at", { ascending: true })
+            .limit(1)
+            .maybeSingle();
+          if (chan?.inbound_phone_e164) callerId = String(chan.inbound_phone_e164);
+        } catch (_e) { /* ignore */ }
+
+        const body: Record<string, unknown> = {
+          call_handler: "laml_webhooks",
+          call_request_url: sendCallsUrl,
+          call_request_method: "POST",
+          send_calls_url: sendCallsUrl,
+          send_calls_method: "POST",
+        };
+        if (callerId) {
+          body.caller_id = callerId;
+          body.send_as = callerId;
+        }
+
+        const put = await fetch(`${baseUrl}/api/relay/rest/endpoints/sip/${found.id}`, {
+          method: "PUT",
+          headers: {
+            Authorization: `Basic ${basic}`,
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify(body),
+        });
+        const putBody = await put.text().catch(() => "");
+        console.log(
+          "[selfheal] PUT",
+          found.id,
+          "username", found.username,
+          "status", put.status,
+          "sent", body,
+          "resp", putBody.slice(0, 500),
+        );
+      } else {
+        console.warn(
+          "[selfheal] endpoint not found on SignalWire for username",
+          existing.sip_username,
+          "— check that this endpoint exists on the SignalWire project.",
+        );
       }
     } catch (e) {
       console.warn("[pbx-webrtc-credentials] send_calls_url self-heal failed", e);
@@ -206,6 +280,9 @@ Deno.serve(async (req) => {
     username,
     password,
     caller_id: callerId || username,
+    call_handler: "laml_webhooks",
+    call_request_url: sendCallsUrl,
+    call_request_method: "POST",
     send_calls_url: sendCallsUrl,
     send_calls_method: "POST",
     encryption: "auto",

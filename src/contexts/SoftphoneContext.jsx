@@ -37,7 +37,11 @@ export const useSoftphone = () => {
       dial: async () => { throw new Error('Softphone not mounted'); },
       sendDigits: async () => {},
       setMuted: async () => {},
+      setHold: async () => {},
+      transfer: async () => { throw new Error('Softphone not mounted'); },
       expectIncomingAccept: () => {},
+      registerEmbedded: () => () => {},
+      embeddedActive: false,
     };
   }
   return ctx;
@@ -140,6 +144,15 @@ export const SoftphoneProvider = ({ children }) => {
   const [panelOpen, setPanelOpen] = useState(false);
   const openPanel = useCallback(() => setPanelOpen(true), []);
   const closePanel = useCallback(() => setPanelOpen(false), []);
+  // When an embedded softphone workspace (e.g. the /pbx/softphone page) is
+  // mounted, the floating modal panel hides — the embedded UI fully owns
+  // the dial/in-call/ringing experience while it is visible.
+  const [embeddedCount, setEmbeddedCount] = useState(0);
+  const registerEmbedded = useCallback(() => {
+    setEmbeddedCount((n) => n + 1);
+    return () => setEmbeddedCount((n) => Math.max(0, n - 1));
+  }, []);
+  const embeddedActive = embeddedCount > 0;
   const incomingCallRef = useRef(null);
   const activeCallRef = useRef(null);
   const sipDomainRef = useRef(null);
@@ -156,11 +169,20 @@ export const SoftphoneProvider = ({ children }) => {
   // Wrap a SIP.js Session with the API the rest of the app expects.
   const wrapSession = useCallback((session, audioEl) => {
     session.stateChange.addListener((state) => {
-      console.log('[softphone] session state', state);
+      console.log('[softphone] session', session.id, 'state →', state);
       if (state === SessionState.Establishing || state === SessionState.Established) {
         attachRemoteAudio(session, audioEl);
       }
       if (state === SessionState.Terminated) {
+        // Surface why the call ended (SIP response code / reason) so we can
+        // tell "rejected by carrier" apart from "user hung up".
+        try {
+          const resp = session.response || session.outgoingResponse || session.incomingResponse;
+          if (resp) {
+            console.log('[softphone] terminated reason',
+              resp.statusCode, resp.reasonPhrase || '');
+          }
+        } catch { /* noop */ }
         setActive((cur) => (cur && cur.__session === session ? null : cur));
       }
     });
@@ -208,6 +230,41 @@ export const SoftphoneProvider = ({ children }) => {
             if (s.track && s.track.kind === 'audio') s.track.enabled = true;
           });
         } catch (e) { console.warn(e); }
+      },
+      // Local-track-based hold. This is NOT a true SIP re-INVITE hold (carrier
+      // won't play music on hold), but it gives the user a working two-way
+      // mute experience until we wire up proper re-INVITE + MOH.
+      audioHold: async () => {
+        try {
+          const pc = session?.sessionDescriptionHandler?.peerConnection;
+          pc?.getSenders().forEach((s) => {
+            if (s.track && s.track.kind === 'audio') s.track.enabled = false;
+          });
+          pc?.getReceivers().forEach((r) => {
+            if (r.track && r.track.kind === 'audio') r.track.enabled = false;
+          });
+        } catch (e) { console.warn('[softphone] hold failed', e); }
+      },
+      audioUnhold: async () => {
+        try {
+          const pc = session?.sessionDescriptionHandler?.peerConnection;
+          pc?.getSenders().forEach((s) => {
+            if (s.track && s.track.kind === 'audio') s.track.enabled = true;
+          });
+          pc?.getReceivers().forEach((r) => {
+            if (r.track && r.track.kind === 'audio') r.track.enabled = true;
+          });
+        } catch (e) { console.warn('[softphone] unhold failed', e); }
+      },
+      // Blind transfer via SIP REFER.
+      transfer: async (targetUri) => {
+        try {
+          if (!targetUri) throw new Error('No transfer target');
+          await session.refer(targetUri);
+        } catch (e) {
+          console.warn('[softphone] transfer failed', e);
+          throw e;
+        }
       },
     };
     return wrapped;
@@ -293,8 +350,15 @@ export const SoftphoneProvider = ({ children }) => {
             traceSip: false,
           },
           sessionDescriptionHandlerFactoryOptions: {
+            iceGatheringTimeout: 200,
             peerConnectionConfiguration: {
-              iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+              iceServers: [
+                { urls: [
+                  'stun:stun.l.google.com:19302',
+                  'stun:stun1.l.google.com:19302',
+                  'stun:stun.cloudflare.com:3478',
+                ] },
+              ],
             },
           },
           delegate: {
@@ -312,6 +376,15 @@ export const SoftphoneProvider = ({ children }) => {
         if (cancelled) {
           try { await ua.stop(); } catch { /* noop */ }
           return null;
+        }
+
+        // Pre-warm mic permission + device so getUserMedia at dial time is instant.
+        try {
+          const warm = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          warm.getTracks().forEach((t) => t.stop());
+          console.log('[softphone] mic pre-warmed');
+        } catch (e) {
+          console.warn('[softphone] mic pre-warm failed (will request at dial time)', e?.name || e);
         }
 
         const registerer = new Registerer(ua);
@@ -401,8 +474,28 @@ export const SoftphoneProvider = ({ children }) => {
     } catch (e) { console.warn('[softphone] setMuted failed', e); }
   }, []);
 
+  const setHold = useCallback(async (held) => {
+    const cur = activeCallRef.current;
+    if (!cur) return;
+    try {
+      if (held) await cur.audioHold?.();
+      else await cur.audioUnhold?.();
+    } catch (e) { console.warn('[softphone] setHold failed', e); }
+  }, []);
+
+  const transfer = useCallback(async (target) => {
+    const cur = activeCallRef.current;
+    if (!cur || !sipDomainRef.current) throw new Error('No active call');
+    const uriStr = buildTargetUri(target, sipDomainRef.current);
+    const targetUri = UserAgent.makeURI(uriStr);
+    if (!targetUri) throw new Error('Invalid transfer target');
+    console.log('[softphone] transfer →', uriStr);
+    await cur.transfer(targetUri);
+  }, []);
+
   const dial = useCallback(async (target) => {
     if (!moduleUA || !sipDomainRef.current) {
+      console.warn('[softphone] dial blocked — UA not ready');
       throw new Error('Softphone not connected');
     }
     const audioEl = ensureAudioElement();
@@ -411,7 +504,7 @@ export const SoftphoneProvider = ({ children }) => {
     const uriStr = buildTargetUri(target, sipDomainRef.current);
     const targetUri = UserAgent.makeURI(uriStr);
     if (!targetUri) throw new Error('Invalid dial target');
-    console.log('[softphone] dial →', uriStr);
+    console.log('[softphone] dial →', uriStr, '(input:', target, ')');
 
     const inviter = new Inviter(moduleUA, targetUri, {
       sessionDescriptionHandlerOptions: {
@@ -422,6 +515,7 @@ export const SoftphoneProvider = ({ children }) => {
     setActive(wrapped);
     try {
       await inviter.invite();
+      console.log('[softphone] INVITE sent for', uriStr);
     } catch (e) {
       console.error('[softphone] invite failed', e);
       setActive(null);
@@ -440,7 +534,9 @@ export const SoftphoneProvider = ({ children }) => {
       panelOpen, openPanel, closePanel,
       answer, decline, hangup,
       dial, sendDigits, setMuted,
+      setHold, transfer,
       expectIncomingAccept,
+      registerEmbedded, embeddedActive,
     }}>
       {children}
     </SoftphoneContext.Provider>

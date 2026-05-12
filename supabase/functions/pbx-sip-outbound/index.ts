@@ -55,10 +55,24 @@ const readParams = async (req: Request): Promise<Record<string, string>> => {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok");
 
+  const reqId = crypto.randomUUID().slice(0, 8);
+  const log = (...args: unknown[]) => console.log(`[sip-out ${reqId}]`, ...args);
+
   try {
     const url = new URL(req.url);
     const userId = url.searchParams.get("user") ?? "";
     const params = await readParams(req);
+
+    log("incoming", {
+      method: req.method,
+      user: userId,
+      CallSid: params.CallSid,
+      From: params.From,
+      To: params.To,
+      ToUser: params.ToUser,
+      CallerName: params.CallerName,
+      Direction: params.Direction,
+    });
 
     // Pull the dialed number out of either ToUser or the To SIP URI.
     let dialed = String(params.ToUser ?? "");
@@ -70,6 +84,7 @@ Deno.serve(async (req) => {
     dialed = (dialed || "").trim();
 
     if (!dialed) {
+      log("FAIL no dialed number");
       return xml(`<?xml version="1.0" encoding="UTF-8"?>
 <Response><Say>Sorry, no number was dialed.</Say><Hangup/></Response>`);
     }
@@ -78,6 +93,7 @@ Deno.serve(async (req) => {
     // user. If we don't have one, fall back to the first phone number on
     // the SignalWire project so the call can still go through.
     let callerId = "";
+    let callerIdSource = "none";
     if (userId) {
       try {
         const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -90,9 +106,12 @@ Deno.serve(async (req) => {
           .order("created_at", { ascending: true })
           .limit(1)
           .maybeSingle();
-        if (chan?.inbound_phone_e164) callerId = String(chan.inbound_phone_e164);
+        if (chan?.inbound_phone_e164) {
+          callerId = String(chan.inbound_phone_e164);
+          callerIdSource = "store_channels";
+        }
       } catch (e) {
-        console.warn("[pbx-sip-outbound] caller-id lookup failed", e);
+        log("caller-id store_channels lookup failed", e);
       }
     }
 
@@ -115,12 +134,28 @@ Deno.serve(async (req) => {
             const items: any[] = j?.data ?? (Array.isArray(j) ? j : []);
             const first = items[0];
             const num = first?.number ?? first?.phone_number ?? first?.e164;
-            if (num) callerId = String(num);
+            if (num) {
+              callerId = String(num);
+              callerIdSource = "signalwire_project_first_number";
+            }
+          } else {
+            const t = await r.text().catch(() => "");
+            log("sw phone_numbers lookup failed", r.status, t.slice(0, 200));
           }
         }
       } catch (e) {
-        console.warn("[pbx-sip-outbound] sw fallback caller-id failed", e);
+        log("sw fallback caller-id failed", e);
       }
+    }
+
+    log("resolved callerId", callerId || "(none)", "source", callerIdSource);
+
+    if (!callerId) {
+      // No verified number → SignalWire would reject anyway. Fail loudly so
+      // the user hears a useful reason instead of dead air.
+      log("FAIL no callerId available — refusing to dial");
+      return xml(`<?xml version="1.0" encoding="UTF-8"?>
+<Response><Say voice="alice">No outbound caller I D is configured for this account. Please buy or assign a phone number on Signal Wire and try again.</Say><Hangup/></Response>`);
     }
 
     // Normalise dialed number to E.164 if it looks like a US number.
@@ -132,16 +167,17 @@ Deno.serve(async (req) => {
       else if (digits.length > 0) dest = `+${digits}`;
     }
 
-    const callerAttr = callerId ? ` callerId="${escapeXml(callerId)}"` : "";
+    const callerAttr = ` callerId="${escapeXml(callerId)}"`;
     const laml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Dial${callerAttr} answerOnBridge="true" timeout="30">
     <Number>${escapeXml(dest)}</Number>
   </Dial>
 </Response>`;
+    log("OK dialing", dest, "as", callerId);
     return xml(laml);
   } catch (e) {
-    console.error("[pbx-sip-outbound] error", e);
+    console.error("[sip-out", reqId, "] error", e);
     return xml(`<?xml version="1.0" encoding="UTF-8"?>
 <Response><Say>Sorry, an error occurred placing the call.</Say><Hangup/></Response>`, 200);
   }

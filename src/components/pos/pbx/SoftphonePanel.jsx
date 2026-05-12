@@ -71,6 +71,7 @@ const SoftphonePanel = () => {
     panelOpen, closePanel,
     dial, hangup, sendDigits, setMuted,
     answer, decline, expectIncomingAccept,
+    embeddedActive,
   } = useSoftphone();
   const { user } = useAuth() || {};
   const userId = user?.id;
@@ -175,8 +176,9 @@ const SoftphonePanel = () => {
   const ringing = (!!incomingCall || !!inboundRing) && !inCall;
 
   // Visibility: auto-show on ringing or active call; otherwise only when
-  // the user explicitly opened the panel.
-  const shouldShow = inCall || ringing || panelOpen;
+  // the user explicitly opened the panel. When an embedded workspace owns
+  // the UI (e.g. /pbx/softphone page) hide the floating modal entirely.
+  const shouldShow = !embeddedActive && (inCall || ringing || panelOpen);
   if (!shouldShow) return null;
 
   const handleDial = async () => {

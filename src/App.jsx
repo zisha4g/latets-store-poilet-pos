@@ -153,7 +153,7 @@ function App({ isDemo = false }) {
       case 'pbx':
         if (!settings.enablePBX?.value) return null;
         return isDemo
-          ? <PbxConsole embedded pbxData={pbxData} handlers={handlers} onSimulateCall={() => handleStartCall('1-800-555-1234', 'inbound')} />
+          ? <PbxConsole embedded pbxData={pbxData} handlers={handlers} customers={customers} sales={sales} onSimulateCall={() => handleStartCall('1-800-555-1234', 'inbound')} />
           : <PBXView pbxData={pbxData} handlers={handlers} onSimulateCall={() => handleStartCall('1-800-555-1234', 'inbound')} />;
       case 'settings':
         return <SettingsView settings={settings} handlers={handlers} taxes={taxes} serviceCharges={serviceCharges} pbxData={pbxData} />;

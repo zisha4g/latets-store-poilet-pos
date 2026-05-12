@@ -8,15 +8,15 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/use-toast';
 
-export const QuickCreateCustomerDialog = ({ isOpen, onClose, onCreated, handlers, defaultName = '' }) => {
+export const QuickCreateCustomerDialog = ({ isOpen, onClose, onCreated, handlers, defaultName = '', defaultPhone = '' }) => {
   const [form, setForm] = useState({ name: '', phone: '', email: '', address: '' });
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
-      setForm({ name: defaultName || '', phone: '', email: '', address: '' });
+      setForm({ name: defaultName || '', phone: defaultPhone || '', email: '', address: '' });
     }
-  }, [isOpen, defaultName]);
+  }, [isOpen, defaultName, defaultPhone]);
 
   const handleSave = async () => {
     if (!form.name.trim()) {

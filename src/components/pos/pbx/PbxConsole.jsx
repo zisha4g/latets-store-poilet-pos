@@ -6,7 +6,7 @@ import {
   LayoutDashboard, History, Voicemail, Clock, Music, ListTree, PhoneForwarded,
   Phone, PhoneIncoming, Users, PhoneCall, PhoneOutgoing, Headphones, Mic, MessageSquare,
   Printer, UserSquare2, Sparkles, BarChart3, ShieldCheck, Wand2, Settings as SettingsIcon,
-  Hash, Building2, ArrowLeft,
+  Hash, Building2, ArrowLeft, Mail, Inbox,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -21,8 +21,10 @@ import PbxDashboard from '@/components/pos/pbx/PbxDashboard';
 import CallLogsView from '@/components/pos/pbx/CallLogsView';
 import VoicemailsView from '@/components/pos/pbx/VoicemailsView';
 import SmsView from '@/components/pos/pbx/SmsView';
+import EmailView from '@/components/pos/pbx/EmailView';
+import UnifiedInboxView from '@/components/pos/pbx/UnifiedInboxView';
+import SoftphoneWorkspace from '@/components/pos/pbx/SoftphoneWorkspace';
 import PhoneNumbersSettings from '@/components/pos/settings/PhoneNumbersSettings';
-import { useSoftphone } from '@/contexts/SoftphoneContext';
 
 // Each group has a `mode`: 'comm' (day-to-day communication) or 'config'
 // (admin configuration). The sidebar shows only one mode at a time, toggled
@@ -33,6 +35,7 @@ const SECTION_GROUPS = [
     label: 'Overview',
     mode: 'comm',
     items: [
+      { id: 'inbox', name: 'Unified Inbox', icon: Inbox, status: 'live' },
       { id: 'dashboard', name: 'Dashboard', icon: LayoutDashboard, status: 'live' },
       { id: 'softphone', name: 'Softphone', icon: Phone, status: 'live' },
       { id: 'live', name: 'Live calls', icon: PhoneCall, status: 'planned', phase: 2,
@@ -54,6 +57,7 @@ const SECTION_GROUPS = [
     mode: 'comm',
     items: [
       { id: 'sms', name: 'SMS / MMS', icon: MessageSquare, status: 'live' },
+      { id: 'email', name: 'Email', icon: Mail, status: 'live' },
       { id: 'fax', name: 'Fax', icon: Printer, status: 'planned', phase: 3,
         planned: ['Inbound fax → PDF in Supabase', 'Email notification', 'Outbound fax via SignalWire Fax API'] },
     ],
@@ -183,33 +187,19 @@ const PlannedSection = ({ item }) => (
   </Card>
 );
 
-// Softphone section: the actual UI lives in the global SoftphonePanel
-// overlay. This section just opens the panel on mount and shows a hint
-// for when the user dismisses it.
-const SoftphoneSection = ({ openPanel }) => {
-  useEffect(() => { openPanel(); }, [openPanel]);
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Phone className="w-5 h-5" /> Softphone
-        </CardTitle>
-        <CardDescription>
-          The dialer is shown as a floating panel. Click the button below to
-          reopen it if you closed it.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Button onClick={openPanel}>
-          <Phone className="w-4 h-4 mr-2" /> Open dialer
-        </Button>
-      </CardContent>
-    </Card>
-  );
-};
+// Softphone section: the full embedded workspace (Google-Voice-style).
+// While mounted, the floating SoftphonePanel modal is suppressed so this
+// embedded UI owns the call experience on this page.
+const SoftphoneSection = ({ callLogs, customers, sales, handlers }) => (
+  <SoftphoneWorkspace
+    callLogs={callLogs}
+    customers={customers}
+    sales={sales}
+    handlers={handlers}
+  />
+);
 
-const PbxConsole = ({ pbxData, handlers, onSimulateCall, onReturnToPos, embedded = false }) => {
-  const { openPanel } = useSoftphone();
+const PbxConsole = ({ pbxData, handlers, customers, sales, onSimulateCall, onReturnToPos, embedded = false }) => {
   const allItems = SECTION_GROUPS.flatMap((g) => g.items).filter((i) => !i.action);
 
   // When the Softphone section becomes active, ensure the dialer panel is open.
@@ -253,13 +243,17 @@ const PbxConsole = ({ pbxData, handlers, onSimulateCall, onReturnToPos, embedded
       case 'dashboard':
         return <PbxDashboard pbxData={pbxData} onSimulateCall={onSimulateCall} />;
       case 'softphone':
-        return <SoftphoneSection openPanel={openPanel} />;
+        return <SoftphoneSection callLogs={callLogs} customers={customers} sales={sales} handlers={handlers} />;
       case 'logs':
         return <CallLogsView callLogs={callLogs} />;
       case 'voicemails':
         return <VoicemailsView handlers={handlers.pbx.voicemails} voicemails={voicemails} />;
       case 'sms':
         return <SmsView />;
+      case 'email':
+        return <EmailView />;
+      case 'inbox':
+        return <UnifiedInboxView />;
       case 'hours':
         return <BusinessHoursManager businessHours={businessHours} onUpdate={handlers.pbx.business_hours.upsert} />;
       case 'greetings':
@@ -343,15 +337,7 @@ const PbxConsole = ({ pbxData, handlers, onSimulateCall, onReturnToPos, embedded
                   return (
                     <li key={item.id}>
                       <button
-                        onClick={() => {
-                          if (item.id === 'softphone') {
-                            // Navigate AND open the panel so it's instant.
-                            setActiveId(item.id);
-                            openPanel();
-                          } else {
-                            setActiveId(item.id);
-                          }
-                        }}
+                        onClick={() => setActiveId(item.id)}
                         className={`w-full flex items-center gap-2 px-4 py-2 text-sm transition-colors ${
                           isActive
                             ? 'bg-primary/10 text-primary border-l-2 border-primary'
@@ -373,7 +359,9 @@ const PbxConsole = ({ pbxData, handlers, onSimulateCall, onReturnToPos, embedded
         </aside>
 
         {/* Active section */}
-        <section className="flex-1 overflow-y-auto p-6">
+        <section className={`flex-1 min-h-0 ${
+          active.id === 'softphone' ? 'overflow-hidden' : 'overflow-y-auto p-6'
+        }`}>
           {renderActive()}
         </section>
       </div>

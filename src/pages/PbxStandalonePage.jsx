@@ -89,6 +89,8 @@ const PbxStandalonePage = () => {
           <PbxConsole
             pbxData={pbxData}
             handlers={handlers}
+            customers={data?.customers || []}
+            sales={data?.sales || []}
             onSimulateCall={() => handleStartCall('1-800-555-1234', 'inbound')}
             onReturnToPos={() => navigate('/app/pos')}
           />

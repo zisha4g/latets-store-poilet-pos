@@ -10,7 +10,7 @@ const PbxPage = () => {
         return <div className="p-8">The PBX System is not enabled. Please enable it in the settings.</div>;
     }
     
-    return <PbxConsole pbxData={pbxData} handlers={handlers} onSimulateCall={() => handleStartCall('1-800-555-1234', 'inbound')} />;
+    return <PbxConsole pbxData={pbxData} handlers={handlers} customers={data?.customers || []} sales={data?.sales || []} onSimulateCall={() => handleStartCall('1-800-555-1234', 'inbound')} />;
 };
 
 export default PbxPage;
