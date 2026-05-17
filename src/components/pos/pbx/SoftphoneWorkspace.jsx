@@ -16,7 +16,8 @@ import {
   Phone, PhoneOff, PhoneIncoming, PhoneOutgoing, PhoneMissed,
   Mic, MicOff, Grid3x3, Delete, Pause, Play, ArrowRightLeft, UserPlus,
   StickyNote, History, Wifi, WifiOff, Loader2, User, ShoppingBag,
-  ExternalLink, Check, X,
+  ExternalLink, Check, X, ChevronLeft, ChevronRight, CreditCard,
+  MapPin, FileText, Package, Receipt, ChevronDown,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -25,6 +26,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { QuickCreateCustomerDialog } from '@/components/customers/QuickCreateCustomerDialog';
+import QuickOrderPanel from '@/components/pos/pbx/QuickOrderPanel';
 import { useSoftphone } from '@/contexts/SoftphoneContext';
 import { useAuth } from '@/contexts/SupabaseAuthContext.jsx';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -144,7 +146,209 @@ const RecentCallRow = ({ log, onCall }) => {
   );
 };
 
-const SoftphoneWorkspace = ({ callLogs = [], customers = [], sales = [], handlers = null }) => {
+const OrderHistoryView = ({ orders, selectedOrderId, onSelect, handlers, onCustomerMissing }) => {
+  const selected = useMemo(
+    () => (orders || []).find((o) => o.id === selectedOrderId) || null,
+    [orders, selectedOrderId],
+  );
+
+  if (onCustomerMissing) {
+    return (
+      <Card className="h-full flex items-center justify-center">
+        <div className="text-center text-sm text-muted-foreground p-8">
+          <User className="w-10 h-10 mx-auto mb-2 opacity-40" />
+          Add the caller as a customer to see their order history.
+        </div>
+      </Card>
+    );
+  }
+  if (!orders || orders.length === 0) {
+    return (
+      <Card className="h-full flex items-center justify-center">
+        <div className="text-center text-sm text-muted-foreground p-8">
+          <Receipt className="w-10 h-10 mx-auto mb-2 opacity-40" />
+          This customer has no previous orders yet.
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="h-full grid grid-cols-1 md:grid-cols-[320px_1fr] gap-4">
+      <Card className="flex flex-col min-h-0">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Receipt className="w-4 h-4" /> Orders ({orders.length})
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex-1 min-h-0 p-0">
+          <ScrollArea className="h-full">
+            {orders.map((o) => {
+              const isSel = selectedOrderId === o.id;
+              const date = o.created_at ? new Date(o.created_at) : null;
+              return (
+                <button
+                  key={o.id}
+                  onClick={() => onSelect(o.id)}
+                  className={`w-full text-left px-3 py-2.5 border-b last:border-b-0 transition ${
+                    isSel ? 'bg-primary/10 border-l-2 border-l-primary' : 'hover:bg-muted/50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-medium">#{String(o.id).slice(0, 8)}</div>
+                    <div className="text-sm font-semibold tabular-nums">
+                      ${Number(o.total || 0).toFixed(2)}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between mt-0.5">
+                    <div className="text-[11px] text-muted-foreground">
+                      {date ? date.toLocaleString([], {
+                        month: 'short', day: 'numeric', year: 'numeric',
+                        hour: 'numeric', minute: '2-digit',
+                      }) : '—'}
+                    </div>
+                    {o.payment_method && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase tracking-wider">
+                        {o.payment_method}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground mt-0.5">
+                    {Array.isArray(o.items) ? `${o.items.length} item${o.items.length === 1 ? '' : 's'}` : '—'}
+                  </div>
+                </button>
+              );
+            })}
+          </ScrollArea>
+        </CardContent>
+      </Card>
+
+      <Card className="flex flex-col min-h-0">
+        {!selected ? (
+          <CardContent className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
+            <div className="text-center">
+              <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
+              Select an order to view details
+            </div>
+          </CardContent>
+        ) : (
+          <>
+            <CardHeader className="pb-2 border-b">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Receipt className="w-5 h-5" /> Order #{String(selected.id).slice(0, 8)}
+                  </CardTitle>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    {selected.created_at ? new Date(selected.created_at).toLocaleString() : ''}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-2xl font-bold tabular-nums">
+                    ${Number(selected.total || 0).toFixed(2)}
+                  </div>
+                  {selected.payment_method && (
+                    <span className="inline-flex items-center gap-1 mt-1 text-[11px] px-2 py-0.5 rounded-full bg-muted">
+                      <CreditCard className="w-3 h-3" /> {selected.payment_method}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="flex-1 min-h-0 overflow-auto space-y-3 pt-3">
+              <div>
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1.5">
+                  Items
+                </div>
+                {Array.isArray(selected.items) && selected.items.length > 0 ? (
+                  <div className="border rounded-lg overflow-hidden">
+                    {selected.items.map((it, idx) => (
+                      <div key={idx} className="flex items-center px-3 py-2 border-b last:border-b-0 text-sm">
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium truncate">{it.name || 'Item'}</div>
+                          {it.sku && (
+                            <div className="text-[11px] text-muted-foreground">{it.sku}</div>
+                          )}
+                        </div>
+                        <div className="w-12 text-center text-muted-foreground">×{it.quantity}</div>
+                        <div className="w-20 text-right tabular-nums">
+                          ${(Number(it.price || 0) * Number(it.quantity || 0)).toFixed(2)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-xs text-muted-foreground">No item details.</div>
+                )}
+              </div>
+
+              <div className="border-t pt-3 space-y-1 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Subtotal</span>
+                  <span className="tabular-nums">${Number(selected.subtotal || 0).toFixed(2)}</span>
+                </div>
+                {Number(selected.tax_amount || 0) > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Tax</span>
+                    <span className="tabular-nums">${Number(selected.tax_amount).toFixed(2)}</span>
+                  </div>
+                )}
+                {Number(selected.service_charge || 0) > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Service charge</span>
+                    <span className="tabular-nums">${Number(selected.service_charge).toFixed(2)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between font-semibold pt-1 border-t">
+                  <span>Total</span>
+                  <span className="tabular-nums">${Number(selected.total || 0).toFixed(2)}</span>
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-2 border-t">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(
+                        `Order #${String(selected.id).slice(0, 8)} — $${Number(selected.total || 0).toFixed(2)}`,
+                      );
+                      toast({ title: 'Order summary copied' });
+                    } catch { /* noop */ }
+                  }}
+                >
+                  <FileText className="w-3.5 h-3.5 mr-1.5" /> Copy summary
+                </Button>
+                {handlers?.sales?.delete && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-red-600 hover:text-red-700 hover:bg-red-50 ml-auto"
+                    onClick={async () => {
+                      if (!window.confirm('Void this order? This cannot be undone.')) return;
+                      try {
+                        await handlers.sales.delete(selected.id);
+                        toast({ title: 'Order voided' });
+                        onSelect(null);
+                      } catch (e) {
+                        toast({ title: 'Failed to void', description: e.message, variant: 'destructive' });
+                      }
+                    }}
+                  >
+                    <X className="w-3.5 h-3.5 mr-1.5" /> Void
+                  </Button>
+                )}
+              </div>
+            </CardContent>
+          </>
+        )}
+      </Card>
+    </div>
+  );
+};
+
+const SoftphoneWorkspace = ({ callLogs = [], customers = [], sales = [], products = [], handlers = null }) => {
   const {
     status, activeCall, incomingCall,
     dial, hangup, sendDigits, setMuted, setHold, transfer,
@@ -240,6 +444,10 @@ const SoftphoneWorkspace = ({ callLogs = [], customers = [], sales = [], handler
   const [transferTarget, setTransferTarget] = useState('');
   const [transferring, setTransferring] = useState(false);
   const [showAddCustomer, setShowAddCustomer] = useState(false);
+  const [recentOrderIds, setRecentOrderIds] = useState([]);
+  const [inCallTab, setInCallTab] = useState('order');
+  const [selectedOrderId, setSelectedOrderId] = useState(null);
+  const [dialerCollapsed, setDialerCollapsed] = useState(false);
 
   // Refs so we can capture the call snapshot at the moment of hangup.
   const callSnapshotRef = useRef(null);
@@ -298,6 +506,9 @@ const SoftphoneWorkspace = ({ callLogs = [], customers = [], sales = [], handler
       setShowTransfer(false);
       setTransferTarget('');
       setNotes('');
+      setRecentOrderIds([]);
+      setInCallTab('order');
+      setSelectedOrderId(null);
       return;
     }
     const started = (prev) => prev || Date.now();
@@ -486,8 +697,7 @@ const SoftphoneWorkspace = ({ callLogs = [], customers = [], sales = [], handler
     if (!matchedCustomer?.id || !Array.isArray(sales)) return [];
     return sales
       .filter((s) => s.customer_id === matchedCustomer.id)
-      .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
-      .slice(0, 5);
+      .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
   }, [matchedCustomer, sales]);
 
   const customerStats = useMemo(() => {
@@ -519,15 +729,15 @@ const SoftphoneWorkspace = ({ callLogs = [], customers = [], sales = [], handler
     );
   };
 
-  const CustomerPanel = () => {
+  const CustomerPanel = ({ large = false }) => {
     if (!counterpartyNumber) return null;
     if (matchedCustomer) {
       return (
-        <Card>
+        <Card className="h-full flex flex-col">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <User className="w-4 h-4" /> Customer
+              <CardTitle className={`flex items-center gap-2 ${large ? 'text-base' : 'text-sm'}`}>
+                <User className={large ? 'w-5 h-5' : 'w-4 h-4'} /> Customer details
               </CardTitle>
               {customerStats && customerStats.count > 0 && (
                 <Badge variant="secondary" className="text-[10px]">
@@ -536,66 +746,70 @@ const SoftphoneWorkspace = ({ callLogs = [], customers = [], sales = [], handler
               )}
             </div>
           </CardHeader>
-          <CardContent className="space-y-2">
-            <div>
-              <div className="font-semibold">{matchedCustomer.name || 'Customer'}</div>
-              {matchedCustomer.email && (
-                <div className="text-xs text-muted-foreground truncate">{matchedCustomer.email}</div>
-              )}
-              {matchedCustomer.phone && (
-                <div className="text-xs text-muted-foreground">{formatPhone(matchedCustomer.phone)}</div>
-              )}
+          <CardContent className="space-y-3 flex-1 min-h-0 flex flex-col">
+            <div className="flex items-center gap-3">
+              <Avatar name={matchedCustomer.name} size="sm" />
+              <div className="min-w-0">
+                <div className="font-semibold truncate">{matchedCustomer.name || 'Customer'}</div>
+                {matchedCustomer.email && (
+                  <div className="text-xs text-muted-foreground truncate">{matchedCustomer.email}</div>
+                )}
+                {matchedCustomer.phone && (
+                  <div className="text-xs text-muted-foreground">{formatPhone(matchedCustomer.phone)}</div>
+                )}
+              </div>
             </div>
 
-            {customerOrders.length > 0 ? (
-              <div className="border-t pt-2">
-                <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
-                  <ShoppingBag className="w-3 h-3" /> Recent orders
-                </div>
-                <ul className="space-y-1">
-                  {customerOrders.map((s) => (
-                    <li key={s.id} className="flex items-center justify-between text-xs">
-                      <span className="truncate text-muted-foreground">
-                        {s.created_at ? new Date(s.created_at).toLocaleDateString() : 'Order'}
-                        {s.id ? ` · #${String(s.id).slice(0, 6)}` : ''}
-                      </span>
-                      <span className="tabular-nums font-medium">
-                        ${Number(s.total || 0).toFixed(2)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : (
-              <div className="text-[11px] text-muted-foreground border-t pt-2">
-                No previous orders.
+            {matchedCustomer.address && (
+              <div className="text-xs text-muted-foreground border-t pt-2">
+                {matchedCustomer.address}
               </div>
             )}
 
-            <div className="flex gap-2 pt-1">
-              <Button
-                size="sm"
-                variant="outline"
-                className="flex-1"
-                onClick={() => navigate('/app/pos')}
-              >
-                <ShoppingBag className="w-3.5 h-3.5 mr-1.5" /> New order
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => navigate('/app/customers')}
-                title="Open customers"
-              >
-                <ExternalLink className="w-3.5 h-3.5" />
-              </Button>
+            <div className="flex-1 min-h-0 flex flex-col border-t pt-2">
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
+                <ShoppingBag className="w-3 h-3" /> Order history
+                {customerOrders.length > 0 && (
+                  <span className="text-muted-foreground/70">({customerOrders.length})</span>
+                )}
+              </div>
+              {customerOrders.length > 0 ? (
+                <ScrollArea className="flex-1 min-h-0 pr-2">
+                  <ul className="space-y-1">
+                    {customerOrders.map((s) => (
+                      <li key={s.id} className="flex items-center justify-between text-xs py-1 border-b last:border-b-0">
+                        <span className="truncate text-muted-foreground">
+                          {s.created_at ? new Date(s.created_at).toLocaleDateString() : 'Order'}
+                          {s.id ? ` · #${String(s.id).slice(0, 6)}` : ''}
+                        </span>
+                        <span className="tabular-nums font-medium">
+                          ${Number(s.total || 0).toFixed(2)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </ScrollArea>
+              ) : (
+                <div className="text-[11px] text-muted-foreground">
+                  No previous orders.
+                </div>
+              )}
             </div>
+
+            <Button
+              size="sm"
+              variant="ghost"
+              className="justify-start text-xs"
+              onClick={() => navigate('/app/customers')}
+            >
+              <ExternalLink className="w-3.5 h-3.5 mr-1.5" /> Open in customers
+            </Button>
           </CardContent>
         </Card>
       );
     }
     return (
-      <Card>
+      <Card className="h-full">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm flex items-center gap-2">
             <UserPlus className="w-4 h-4" /> Unknown caller
@@ -673,110 +887,104 @@ const SoftphoneWorkspace = ({ callLogs = [], customers = [], sales = [], handler
     }
 
     if (inCall) {
+      const tabs = [
+        { id: 'customer', label: 'Customer', icon: User },
+        { id: 'order', label: 'New Order', icon: ShoppingBag },
+        { id: 'history', label: 'Order History', icon: History, count: customerOrders.length },
+        { id: 'notes', label: 'Notes', icon: StickyNote },
+      ];
       return (
         <motion.div
           key="incall"
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          className="h-full flex flex-col p-6 gap-5"
+          className="h-full flex flex-col"
         >
-          {/* Caller hero */}
-          <div className="flex items-center gap-5">
-            <Avatar name={matchedCustomer?.name || counterpartyName || counterpartyNumber} />
-            <div className="flex-1 min-w-0">
-              <div className="text-[11px] uppercase tracking-widest text-emerald-700">On call</div>
-              <div className="text-2xl font-semibold truncate">
+          {/* Compact call header strip */}
+          <div className="px-4 py-2.5 border-b border-border bg-gradient-to-r from-emerald-50 to-transparent flex items-center gap-3">
+            <Avatar name={matchedCustomer?.name || counterpartyName || counterpartyNumber} size="sm" />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] uppercase tracking-widest text-emerald-700 font-semibold">On call</span>
+                <span className="inline-flex w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <CallTimer startedAt={callStarted} className="text-xs text-emerald-700 font-medium" />
+              </div>
+              <div className="font-semibold truncate">
                 {matchedCustomer?.name || counterpartyName || formatPhone(counterpartyNumber) || 'Active call'}
               </div>
-              <div className="text-sm text-muted-foreground">
+              <div className="text-xs text-muted-foreground">
                 {formatPhone(counterpartyNumber)}
               </div>
-              <div className="mt-1 text-sm">
-                <CallTimer startedAt={callStarted} className="text-emerald-700 font-medium" />
-              </div>
             </div>
-            <button
-              onClick={() => hangup()}
-              className="w-14 h-14 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center shadow-lg transition active:scale-95"
-              title="End call"
-            >
-              <PhoneOff className="w-6 h-6" />
-            </button>
+
+            {/* Inline call controls — compact icon buttons */}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={toggleMute}
+                className={`w-10 h-10 rounded-lg border flex items-center justify-center transition ${
+                  muted ? 'bg-primary text-primary-foreground border-transparent' : 'bg-background hover:bg-muted border-border'
+                }`}
+                title={muted ? 'Unmute' : 'Mute'}
+              >
+                {muted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+              </button>
+              <button
+                onClick={() => setShowKeypadInCall((v) => !v)}
+                className={`w-10 h-10 rounded-lg border flex items-center justify-center transition ${
+                  showKeypadInCall ? 'bg-primary text-primary-foreground border-transparent' : 'bg-background hover:bg-muted border-border'
+                }`}
+                title="Keypad"
+              >
+                <Grid3x3 className="w-4 h-4" />
+              </button>
+              <button
+                onClick={toggleHold}
+                className={`w-10 h-10 rounded-lg border flex items-center justify-center transition ${
+                  held ? 'bg-amber-500 text-white border-transparent' : 'bg-background hover:bg-muted border-border'
+                }`}
+                title={held ? 'Resume' : 'Hold'}
+              >
+                {held ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
+              </button>
+              <button
+                onClick={() => setShowTransfer((v) => !v)}
+                className={`w-10 h-10 rounded-lg border flex items-center justify-center transition ${
+                  showTransfer ? 'bg-primary text-primary-foreground border-transparent' : 'bg-background hover:bg-muted border-border'
+                }`}
+                title="Transfer"
+              >
+                <ArrowRightLeft className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => hangup()}
+                className="ml-2 h-10 px-4 rounded-lg bg-red-600 hover:bg-red-700 text-white flex items-center gap-1.5 shadow transition active:scale-95"
+                title="End call"
+              >
+                <PhoneOff className="w-4 h-4" />
+                <span className="text-sm font-medium">End</span>
+              </button>
+            </div>
           </div>
 
-          {/* Call controls */}
-          <div className="grid grid-cols-5 gap-2">
-            <button
-              onClick={toggleMute}
-              className={`flex flex-col items-center justify-center h-16 rounded-xl border transition ${
-                muted
-                  ? 'bg-primary text-primary-foreground border-transparent'
-                  : 'bg-background hover:bg-muted border-border'
-              }`}
-            >
-              {muted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-              <span className="text-[11px] mt-1">{muted ? 'Unmute' : 'Mute'}</span>
-            </button>
-            <button
-              onClick={() => setShowKeypadInCall((v) => !v)}
-              className={`flex flex-col items-center justify-center h-16 rounded-xl border transition ${
-                showKeypadInCall
-                  ? 'bg-primary text-primary-foreground border-transparent'
-                  : 'bg-background hover:bg-muted border-border'
-              }`}
-            >
-              <Grid3x3 className="w-5 h-5" />
-              <span className="text-[11px] mt-1">Keypad</span>
-            </button>
-            <button
-              onClick={toggleHold}
-              className={`flex flex-col items-center justify-center h-16 rounded-xl border transition ${
-                held
-                  ? 'bg-amber-500 text-white border-transparent'
-                  : 'bg-background hover:bg-muted border-border'
-              }`}
-              title={held ? 'Resume call' : 'Hold call'}
-            >
-              {held ? <Play className="w-5 h-5" /> : <Pause className="w-5 h-5" />}
-              <span className="text-[11px] mt-1">{held ? 'Resume' : 'Hold'}</span>
-            </button>
-            <button
-              onClick={() => setShowTransfer((v) => !v)}
-              className={`flex flex-col items-center justify-center h-16 rounded-xl border transition ${
-                showTransfer
-                  ? 'bg-primary text-primary-foreground border-transparent'
-                  : 'bg-background hover:bg-muted border-border'
-              }`}
-            >
-              <ArrowRightLeft className="w-5 h-5" />
-              <span className="text-[11px] mt-1">Transfer</span>
-            </button>
-            <button
-              disabled
-              className="flex flex-col items-center justify-center h-16 rounded-xl border border-border bg-background opacity-50"
-              title="3-way call — coming soon"
-            >
-              <UserPlus className="w-5 h-5" />
-              <span className="text-[11px] mt-1">Add</span>
-            </button>
-          </div>
-
+          {/* Transfer & in-call keypad popovers (don't push content) */}
           {showTransfer && (
-            <div className="flex gap-2 items-center bg-muted/40 rounded-xl p-2">
+            <div className="px-4 py-2 border-b bg-muted/30 flex gap-2 items-center">
               <Input
                 value={transferTarget}
                 onChange={(e) => setTransferTarget(e.target.value)}
                 placeholder="Number or extension to transfer to"
-                className="flex-1 h-10"
+                className="flex-1 h-9"
                 onKeyDown={(e) => { if (e.key === 'Enter') handleTransfer(); }}
                 autoFocus
               />
               <Button
                 onClick={handleTransfer}
                 disabled={!transferTarget.trim() || transferring}
+                size="sm"
                 className="bg-emerald-600 hover:bg-emerald-700 text-white"
               >
                 {transferring ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                <span className="ml-1.5">Transfer</span>
               </Button>
               <Button
                 variant="ghost"
@@ -787,34 +995,102 @@ const SoftphoneWorkspace = ({ callLogs = [], customers = [], sales = [], handler
               </Button>
             </div>
           )}
-
           {showKeypadInCall && (
-            <div className="max-w-xs">
-              <Keypad onPress={handleKey} compact />
+            <div className="px-4 py-3 border-b bg-muted/30 flex justify-center">
+              <div className="w-64">
+                <Keypad onPress={handleKey} compact />
+              </div>
             </div>
           )}
 
-          {/* Two-column: customer + notes */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-1">
-            <CustomerPanel />
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  <StickyNote className="w-4 h-4" /> Call notes
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <Textarea
-                  placeholder="Jot down something about this call…"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  className="min-h-[110px] resize-none"
+          {/* Tab nav */}
+          <div className="flex items-center gap-0 border-b border-border bg-card px-2">
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => { setInCallTab(t.id); if (t.id !== 'history') setSelectedOrderId(null); }}
+                className={`flex items-center gap-2 px-4 py-2.5 text-sm border-b-2 -mb-px transition ${
+                  inCallTab === t.id
+                    ? 'border-primary text-primary font-medium'
+                    : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/40'
+                }`}
+              >
+                <t.icon className="w-4 h-4" />
+                {t.label}
+                {typeof t.count === 'number' && t.count > 0 && (
+                  <span className={`ml-1 inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full text-[10px] font-semibold ${
+                    inCallTab === t.id ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                  }`}>
+                    {t.count}
+                  </span>
+                )}
+              </button>
+            ))}
+            {recentOrderIds.length > 0 && (
+              <div className="ml-auto pr-2 flex items-center gap-1.5 text-xs text-emerald-700">
+                <Check className="w-3.5 h-3.5" />
+                {recentOrderIds.length} order{recentOrderIds.length === 1 ? '' : 's'} this call
+              </div>
+            )}
+          </div>
+
+          {/* Big tab content */}
+          <div className="flex-1 min-h-0 overflow-hidden bg-muted/20">
+            {inCallTab === 'customer' && (
+              <div className="h-full p-4 overflow-auto">
+                <CustomerPanel large />
+              </div>
+            )}
+            {inCallTab === 'order' && (
+              <div className="h-full p-4">
+                <QuickOrderPanel
+                  products={products}
+                  customer={matchedCustomer}
+                  handlers={handlers}
+                  large
+                  onCreated={(s) => {
+                    if (s?.id) setRecentOrderIds((prev) => [...prev, s.id]);
+                    toast({
+                      title: 'Order saved during call',
+                      description: `Total $${Number(s?.total || 0).toFixed(2)}`,
+                    });
+                  }}
                 />
-                <div className="text-[11px] text-muted-foreground mt-1">
-                  Saved to your call log when the call ends.
-                </div>
-              </CardContent>
-            </Card>
+              </div>
+            )}
+            {inCallTab === 'history' && (
+              <div className="h-full p-4 overflow-hidden">
+                <OrderHistoryView
+                  orders={customerOrders}
+                  selectedOrderId={selectedOrderId}
+                  onSelect={setSelectedOrderId}
+                  handlers={handlers}
+                  onCustomerMissing={!matchedCustomer}
+                />
+              </div>
+            )}
+            {inCallTab === 'notes' && (
+              <div className="h-full p-4 overflow-auto">
+                <Card className="h-full flex flex-col">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      <StickyNote className="w-4 h-4" /> Call notes
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="flex-1 flex flex-col">
+                    <Textarea
+                      placeholder="Jot down something about this call…"
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      className="flex-1 min-h-[200px] resize-none"
+                    />
+                    <div className="text-[11px] text-muted-foreground mt-2">
+                      Saved to your call log automatically when the call ends.
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
           </div>
         </motion.div>
       );
@@ -859,7 +1135,7 @@ const SoftphoneWorkspace = ({ callLogs = [], customers = [], sales = [], handler
   };
 
   return (
-    <div className="h-full flex gap-4 p-4 min-h-0">
+    <div className="h-full flex gap-3 p-3 min-h-0">
       {/* Main pane */}
       <div className="flex-1 min-w-0 rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
         <AnimatePresence mode="wait">
@@ -867,11 +1143,38 @@ const SoftphoneWorkspace = ({ callLogs = [], customers = [], sales = [], handler
         </AnimatePresence>
       </div>
 
-      {/* Dialer pane (always visible) */}
+      {/* Collapsed dialer rail (in-call only) */}
+      {inCall && dialerCollapsed && (
+        <button
+          onClick={() => setDialerCollapsed(false)}
+          className="w-10 shrink-0 rounded-2xl border border-border bg-card shadow-sm flex flex-col items-center justify-center gap-2 hover:bg-muted/40 transition"
+          title="Show dialer"
+        >
+          <ChevronLeft className="w-4 h-4" />
+          <Phone className="w-4 h-4 text-muted-foreground" />
+          <div className="[writing-mode:vertical-rl] rotate-180 text-[10px] uppercase tracking-widest text-muted-foreground">
+            Dialer
+          </div>
+        </button>
+      )}
+
+      {/* Dialer pane */}
+      {(!inCall || !dialerCollapsed) && (
       <div className="w-[340px] shrink-0 rounded-2xl border border-border bg-card shadow-sm flex flex-col overflow-hidden">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
           <div className="font-semibold text-sm">Dialer</div>
-          <StatusChip status={status} />
+          <div className="flex items-center gap-2">
+            <StatusChip status={status} />
+            {inCall && (
+              <button
+                onClick={() => setDialerCollapsed(true)}
+                className="text-muted-foreground hover:text-foreground p-1 rounded hover:bg-muted"
+                title="Collapse dialer"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         </div>
         <div className="p-4 space-y-3 flex-1 min-h-0 flex flex-col">
           <div className="relative">
@@ -915,6 +1218,7 @@ const SoftphoneWorkspace = ({ callLogs = [], customers = [], sales = [], handler
           )}
         </div>
       </div>
+      )}
 
       {handlers?.customers?.add && (
         <QuickCreateCustomerDialog

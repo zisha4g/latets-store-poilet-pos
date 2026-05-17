@@ -190,16 +190,17 @@ const PlannedSection = ({ item }) => (
 // Softphone section: the full embedded workspace (Google-Voice-style).
 // While mounted, the floating SoftphonePanel modal is suppressed so this
 // embedded UI owns the call experience on this page.
-const SoftphoneSection = ({ callLogs, customers, sales, handlers }) => (
+const SoftphoneSection = ({ callLogs, customers, sales, products, handlers }) => (
   <SoftphoneWorkspace
     callLogs={callLogs}
     customers={customers}
     sales={sales}
+    products={products}
     handlers={handlers}
   />
 );
 
-const PbxConsole = ({ pbxData, handlers, customers, sales, onSimulateCall, onReturnToPos, embedded = false }) => {
+const PbxConsole = ({ pbxData, handlers, customers, sales, products, onSimulateCall, onReturnToPos, embedded = false }) => {
   const allItems = SECTION_GROUPS.flatMap((g) => g.items).filter((i) => !i.action);
 
   // When the Softphone section becomes active, ensure the dialer panel is open.
@@ -243,7 +244,7 @@ const PbxConsole = ({ pbxData, handlers, customers, sales, onSimulateCall, onRet
       case 'dashboard':
         return <PbxDashboard pbxData={pbxData} onSimulateCall={onSimulateCall} />;
       case 'softphone':
-        return <SoftphoneSection callLogs={callLogs} customers={customers} sales={sales} handlers={handlers} />;
+        return <SoftphoneSection callLogs={callLogs} customers={customers} sales={sales} products={products} handlers={handlers} />;
       case 'logs':
         return <CallLogsView callLogs={callLogs} />;
       case 'voicemails':

@@ -91,6 +91,7 @@ const PbxStandalonePage = () => {
             handlers={handlers}
             customers={data?.customers || []}
             sales={data?.sales || []}
+            products={data?.products || []}
             onSimulateCall={() => handleStartCall('1-800-555-1234', 'inbound')}
             onReturnToPos={() => navigate('/app/pos')}
           />

@@ -6,6 +6,7 @@ import { HelmetProvider } from 'react-helmet-async';
 import AppLayout from '@/pages/AppLayout.jsx';
 import LandingPage from '@/pages/LandingPage.jsx';
 import PricingPage from '@/pages/PricingPage.jsx';
+import PrivacyPolicyPage from '@/pages/PrivacyPolicyPage.jsx';
 import DemoPage from '@/pages/DemoPage.jsx';
 import LoginPage from '@/pages/LoginPage.jsx';
 import SignupPage from '@/pages/SignupPage.jsx';
@@ -86,6 +87,10 @@ const webRoutes = [
   {
     path: "/pricing",
     element: <PricingPage />,
+  },
+  {
+    path: "/privacy",
+    element: <PrivacyPolicyPage />,
   },
   {
     path: "/demo",

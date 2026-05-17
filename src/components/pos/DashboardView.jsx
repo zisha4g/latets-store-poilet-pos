@@ -1,228 +1,172 @@
 import React, { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { DollarSign, Package, ShoppingCart, AlertTriangle, PlusCircle, Users, Info } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Input } from '@/components/ui/input';
+import { ShoppingCart, PlusCircle, Settings2, Sparkles } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { useAuth } from '@/contexts/SupabaseAuthContext.jsx';
+import { useIsAdmin } from '@/hooks/useIsAdmin.js';
+import { useDashboardMetrics } from './dashboard/useDashboardMetrics';
+import { useDashboardLayout } from './dashboard/useDashboardLayout';
+import { dashboardWidgetCatalog, SECTIONS } from './dashboard/widgets';
+import CustomizeDashboardDialog from './dashboard/CustomizeDashboardDialog';
 
-const StatCard = ({ title, value, icon, color, description }) => (
-  <Card>
-    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-      <CardTitle className="text-xs sm:text-sm font-medium">{title}</CardTitle>
-      {icon}
-    </CardHeader>
-    <CardContent>
-      <div className="text-xl sm:text-2xl font-bold">{value}</div>
-      <p className="text-[10px] sm:text-xs text-muted-foreground mt-1">{description}</p>
-    </CardContent>
-  </Card>
-);
+const greetingFor = (date = new Date()) => {
+  const h = date.getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 18) return 'Good afternoon';
+  return 'Good evening';
+};
 
-const DashboardView = ({ data }) => {
-  const { products, sales, customers, settings } = data;
+const firstNameOf = (user) => {
+  if (!user) return '';
+  const md = user.user_metadata || {};
+  const full = md.full_name || md.name || '';
+  if (full) return full.split(' ')[0];
+  if (user.email) return user.email.split('@')[0];
+  return '';
+};
+
+// Map widget size to Tailwind column-span classes for the Activity grid.
+const sizeColSpan = (size) => {
+  if (size === 'lg') return 'lg:col-span-3';
+  if (size === 'md') return 'lg:col-span-2';
+  return 'lg:col-span-1';
+};
+
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1, transition: { staggerChildren: 0.04 } },
+};
+const itemVariants = {
+  hidden: { y: 12, opacity: 0 },
+  visible: { y: 0, opacity: 1 },
+};
+
+const DashboardView = ({ data, handlers }) => {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const { isAdmin } = useIsAdmin(user);
+  const [customizeOpen, setCustomizeOpen] = useState(false);
+
+  const metrics = useDashboardMetrics(data);
+
+  // Filter admin-only widgets out of the catalog entirely for non-admins so
+  // they can't even toggle them on in the Customize dialog.
+  const catalog = useMemo(
+    () => dashboardWidgetCatalog.filter((w) => !w.adminOnly || isAdmin),
+    [isAdmin],
+  );
+
+  const { grouped, setVisible, move, reset } = useDashboardLayout(
+    catalog,
+    data?.settings,
+    handlers?.settings,
+  );
 
   const today = new Date();
-  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const dateLabel = today.toLocaleDateString(undefined, {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  });
 
-  const salesToday = useMemo(() => sales.filter(sale => new Date(sale.timestamp) >= startOfToday), [sales]);
-  const revenueToday = useMemo(() => salesToday.reduce((sum, sale) => sum + sale.total, 0), [salesToday]);
+  const renderSection = (section) => {
+    const items = (grouped[section.id] || []).filter((w) => w.visible);
+    if (items.length === 0) return null;
 
-  const lowStockProducts = useMemo(() => {
-    const lowStockThreshold = settings?.lowStockThreshold?.value || 10;
-    return products.filter(p => p.stock <= lowStockThreshold);
-  }, [products, settings]);
+    // Action Center & Overview: 4-col grid of compact cards.
+    // Activity: 3-col grid of taller list cards that respect widget size.
+    const gridClass =
+      section.id === 'activity'
+        ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4'
+        : 'grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4';
 
-  const recentSales = useMemo(() => [...sales].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 5), [sales]);
-
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.1,
-      },
-    },
+    return (
+      <section key={section.id} className="mb-6 md:mb-8">
+        <div className="mb-3">
+          <h2 className="text-lg sm:text-xl font-semibold">{section.title}</h2>
+          <p className="text-xs sm:text-sm text-muted-foreground">{section.subtitle}</p>
+        </div>
+        <motion.div
+          className={gridClass}
+          variants={containerVariants}
+          initial="hidden"
+          animate="visible"
+        >
+          {items.map((widget) => {
+            const Component = widget.Component;
+            return (
+              <motion.div
+                key={widget.id}
+                variants={itemVariants}
+                className={section.id === 'activity' ? sizeColSpan(widget.defaultSize) : ''}
+              >
+                <Component metrics={metrics} navigate={navigate} isAdmin={isAdmin} />
+              </motion.div>
+            );
+          })}
+        </motion.div>
+      </section>
+    );
   };
 
-  const itemVariants = {
-    hidden: { y: 20, opacity: 0 },
-    visible: {
-      y: 0,
-      opacity: 1,
-    },
-  };
-
-  // Duplicate detection by phone or email
-  const normalizePhone = (p) => (p || '').replace(/\D/g, '');
-  const duplicateGroups = useMemo(() => {
-    const byPhone = new Map();
-    const byEmail = new Map();
-    for (const c of customers) {
-      const phone = normalizePhone(c.phone);
-      if (phone && phone.length >= 7) {
-        const arr = byPhone.get(phone) || [];
-        arr.push(c);
-        byPhone.set(phone, arr);
-      }
-      const email = (c.email || '').trim().toLowerCase();
-      if (email) {
-        const arr = byEmail.get(email) || [];
-        arr.push(c);
-        byEmail.set(email, arr);
-      }
-    }
-    const groups = [];
-    for (const [key, arr] of byPhone.entries()) if (arr.length > 1) groups.push({ type: 'phone', key, customers: arr });
-    for (const [key, arr] of byEmail.entries()) if (arr.length > 1) groups.push({ type: 'email', key, customers: arr });
-    return groups;
-  }, [customers]);
-
-  const [showDupBanner, setShowDupBanner] = useState(true);
+  const anyVisible = SECTIONS.some((s) => (grouped[s.id] || []).some((w) => w.visible));
 
   return (
     <motion.div
       key="dashboard"
-      initial={{ opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -20 }}
+      exit={{ opacity: 0, y: -12 }}
       className="h-full p-3 sm:p-4 md:p-6 flex flex-col overflow-y-auto"
     >
-      {showDupBanner && duplicateGroups.length > 0 && (
-        <div className="mb-4 p-3 sm:p-4 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-          <div className="flex items-start gap-2">
-            <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
-            <div>
-              <p className="font-medium">Possible duplicate customers found</p>
-              <p className="text-sm">{duplicateGroups.length} group(s) matched by phone/email. You can review and merge on the Customers page.</p>
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <Button size="sm" variant="outline" onClick={() => navigate('/app/customers')}>Review Duplicates</Button>
-            <Button size="sm" variant="ghost" onClick={() => setShowDupBanner(false)}>Dismiss</Button>
-          </div>
+      {/* ── Header ─────────────────────────────────────────────────────── */}
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between mb-5 md:mb-6 gap-3">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-primary">
+            {greetingFor()}{firstNameOf(user) ? `, ${firstNameOf(user)}` : ''}
+          </h1>
+          <p className="text-sm text-muted-foreground">{dateLabel}</p>
         </div>
-      )}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 md:mb-6 gap-3 sm:gap-0">
-        <h1 className="text-2xl sm:text-3xl font-bold text-primary">Dashboard</h1>
-        <div className="flex flex-col sm:flex-row w-full sm:w-auto gap-2">
-          <Button 
-            onClick={() => navigate('/app/pos')} 
-            className="w-full sm:w-auto"
-          >
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={() => navigate('/app/pos')}>
             <ShoppingCart className="w-4 h-4 mr-2" /> New Sale
           </Button>
-          <Button 
-            variant="outline" 
-            onClick={() => navigate('/app/inventory')}
-            className="w-full sm:w-auto"
-          >
+          <Button variant="outline" onClick={() => navigate('/app/inventory')}>
             <PlusCircle className="w-4 h-4 mr-2" /> Add Product
+          </Button>
+          <Button variant="ghost" onClick={() => setCustomizeOpen(true)} title="Customize dashboard">
+            <Settings2 className="w-4 h-4 mr-2" /> Customize
           </Button>
         </div>
       </div>
 
-      <motion.div
-        className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 mb-4 md:mb-6"
-        variants={containerVariants}
-        initial="hidden"
-        animate="visible"
-      >
-        <motion.div variants={itemVariants}>
-          <StatCard
-            title="Today's Revenue"
-            value={`$${revenueToday.toFixed(2)}`}
-            icon={<DollarSign className="h-4 w-4 text-muted-foreground" />}
-            description={`${salesToday.length} sales today`}
-          />
-        </motion.div>
-        <motion.div variants={itemVariants}>
-          <StatCard
-            title="Total Products"
-            value={products.length}
-            icon={<Package className="h-4 w-4 text-muted-foreground" />}
-            description="Across all categories"
-          />
-        </motion.div>
-        <motion.div variants={itemVariants}>
-          <StatCard
-            title="Total Customers"
-            value={customers.length}
-            icon={<Users className="h-4 w-4 text-muted-foreground" />}
-            description="All registered customers"
-          />
-        </motion.div>
-        <motion.div variants={itemVariants}>
-          <StatCard
-            title="Low Stock Alerts"
-            value={lowStockProducts.length}
-            icon={<AlertTriangle className="h-4 w-4 text-red-500" />}
-            description="Items needing attention"
-          />
-        </motion.div>
-      </motion.div>
+      {/* ── Sections ───────────────────────────────────────────────────── */}
+      {anyVisible ? (
+        SECTIONS.map(renderSection)
+      ) : (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center max-w-sm">
+            <Sparkles className="w-10 h-10 mx-auto mb-3 text-muted-foreground" />
+            <h2 className="text-lg font-semibold mb-1">Your dashboard is empty</h2>
+            <p className="text-sm text-muted-foreground mb-4">
+              You&apos;ve hidden every widget. Open Customize to bring some back.
+            </p>
+            <Button onClick={() => setCustomizeOpen(true)}>
+              <Settings2 className="w-4 h-4 mr-2" /> Customize dashboard
+            </Button>
+          </div>
+        </div>
+      )}
 
-      <motion.div
-        className="grid gap-4 sm:gap-6 grid-cols-1 lg:grid-cols-3 flex-grow overflow-hidden"
-        variants={containerVariants}
-        initial="hidden"
-        animate="visible"
-      >
-        <motion.div variants={itemVariants} className="lg:col-span-2">
-          <Card className="h-full flex flex-col">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg sm:text-xl">Recent Sales</CardTitle>
-            </CardHeader>
-            <CardContent className="flex-grow overflow-hidden pb-3">
-              <ScrollArea className="h-full pr-3">
-                <div className="space-y-3 sm:space-y-4">
-                  {recentSales.length > 0 ? recentSales.map(sale => (
-                    <div key={sale.id} className="flex items-center justify-between p-2 sm:p-3 rounded-lg hover:bg-secondary">
-                      <div className="min-w-0 flex-1">
-                        <p className="font-medium text-sm sm:text-base truncate">Sale #{sale.id.substring(0, 8)}</p>
-                        <p className="text-xs sm:text-sm text-muted-foreground">{new Date(sale.timestamp).toLocaleString()}</p>
-                      </div>
-                      <div className="text-right ml-2 flex-shrink-0">
-                        <p className="font-bold text-base sm:text-lg">${sale.total.toFixed(2)}</p>
-                        <p className="text-xs sm:text-sm text-muted-foreground">{sale.items.length} items</p>
-                      </div>
-                    </div>
-                  )) : (
-                    <div className="text-center text-muted-foreground py-10 text-sm">No recent sales.</div>
-                  )}
-                </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
-        </motion.div>
-
-        <motion.div variants={itemVariants}>
-          <Card className="h-full flex flex-col">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center text-lg sm:text-xl">
-                <AlertTriangle className="w-4 h-4 sm:w-5 sm:h-5 mr-2 text-destructive" />
-                Low Stock Items
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex-grow overflow-hidden pb-3">
-              <ScrollArea className="h-full pr-3">
-                <div className="space-y-2 sm:space-y-3">
-                  {lowStockProducts.length > 0 ? lowStockProducts.map(product => (
-                    <div key={product.id} className="flex items-center justify-between text-xs sm:text-sm">
-                      <span className="font-medium truncate pr-2 sm:pr-4">{product.name}</span>
-                      <span className="font-bold text-destructive flex-shrink-0">{product.stock} left</span>
-                    </div>
-                  )) : (
-                    <div className="text-center text-muted-foreground py-10 text-sm">Inventory is well-stocked!</div>
-                  )}
-                </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
-        </motion.div>
-      </motion.div>
+      <CustomizeDashboardDialog
+        open={customizeOpen}
+        onOpenChange={setCustomizeOpen}
+        grouped={grouped}
+        setVisible={setVisible}
+        move={move}
+        reset={reset}
+      />
     </motion.div>
   );
 };

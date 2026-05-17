@@ -115,8 +115,9 @@ const LandingPage = () => {
       </main>
 
       <footer className="border-t border-border bg-secondary">
-        <div className="container mx-auto px-6 py-8 text-center text-muted-foreground">
-          <p>&copy; {new Date().getFullYear()} StorePilot. All Rights Reserved.</p>
+        <div className="container mx-auto px-6 py-8 text-center text-muted-foreground space-x-4">
+          <span>&copy; {new Date().getFullYear()} StorePilot. All Rights Reserved.</span>
+          <Link to="/privacy" className="hover:text-primary">Privacy Policy</Link>
         </div>
       </footer>
     </div>
