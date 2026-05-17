@@ -16,10 +16,10 @@ const PrivacyPolicyPage = () => {
   return (
     <>
       <Helmet>
-        <title>Privacy Policy - 4 Gon Wheels</title>
+        <title>Privacy Policy - 4G on Wheels</title>
         <meta
           name="description"
-          content="4 Gon Wheels privacy policy: what data we collect, how we use it, and your rights — including SMS messaging consent and opt-out."
+          content="4G on Wheels privacy policy: what data we collect, how we use it, and your rights — including SMS messaging consent and opt-out."
         />
       </Helmet>
 
@@ -42,10 +42,10 @@ const PrivacyPolicyPage = () => {
 
           <Section title="1. Who we are">
             <p>
-              4 Gon Wheels ("4 Gon Wheels", "we", "us", or "our"), operating at 4gonwheels.com,
-              uses StorePilot software to run our point-of-sale, ordering, and phone
-              communications. This policy explains what information we collect, how we use it,
-              and the choices you have.
+              4G on Wheels ("4G on Wheels", "we", "us", or "our"), operating at
+              app.4gonwheels.com, uses StorePilot software to run our point-of-sale, ordering,
+              and phone communications. This policy explains what information we collect, how we
+              use it, and the choices you have.
             </p>
             <p>
               If you have any questions about this policy, contact us at{' '}
@@ -79,7 +79,7 @@ const PrivacyPolicyPage = () => {
 
           <Section title="4. SMS / text messaging">
             <p>
-              When you or your customers opt in to receive text messages from a 4 Gon Wheels
+              When you or your customers opt in to receive text messages from a 4G on Wheels
               phone number (for example, by placing an order, requesting delivery updates, or
               replying to start a conversation), we use that consent to send messages related to
               the requested service — such as order confirmations, delivery status, appointment
@@ -145,7 +145,7 @@ const PrivacyPolicyPage = () => {
 
           <Section title="9. Children">
             <p>
-              4 Gon Wheels is intended for use by adults and is not directed to children under
+              4G on Wheels is intended for use by adults and is not directed to children under
               13. We do not knowingly collect personal information from children.
             </p>
           </Section>
@@ -160,19 +160,19 @@ const PrivacyPolicyPage = () => {
 
           <Section title="11. Contact us">
             <p>
-              4 Gon Wheels<br />
+              4G on Wheels<br />
               162 Adar Ct<br />
               Monsey, NY 10952<br />
               United States<br />
               Email: <a href="mailto:info@4gonwheels.com" className="text-primary hover:underline">info@4gonwheels.com</a><br />
-              Website: <a href="https://4gonwheels.com" className="text-primary hover:underline">4gonwheels.com</a>
+              Website: <a href="https://app.4gonwheels.com" className="text-primary hover:underline">app.4gonwheels.com</a>
             </p>
           </Section>
         </main>
 
         <footer className="border-t border-border bg-secondary mt-12">
           <div className="container mx-auto px-6 py-8 text-center text-muted-foreground text-sm space-x-4">
-            <span>&copy; {new Date().getFullYear()} 4 Gon Wheels. All Rights Reserved.</span>
+            <span>&copy; {new Date().getFullYear()} 4G on Wheels. All Rights Reserved.</span>
             <Link to="/privacy" className="hover:text-primary">Privacy Policy</Link>
           </div>
         </footer>
